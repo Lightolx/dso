@@ -53,9 +53,9 @@ public:
 
 	ImageAndExposure* output;
 
-	float* getG() {if(!valid) return 0; else return G;};
+	float* getG() {if(!valid) return nullptr; else return G;};
 private:
-    float G[256*256];
+    float G[256*256];	// 没必要这么大吧，毕竟只有256个数
     int GDepth;
 	float* vignetteMap;
 	float* vignetteMapInv;
@@ -88,10 +88,10 @@ public:
 	PhotometricUndistorter* photometricUndist;
 
 protected:
-    int w, h, wOrg, hOrg, wUp, hUp;
+    int w, h, wOrg, hOrg, wUp, hUp;		// wOrg, hOrg是图像原始尺寸; w, h是可视化时图片的宽高
     int upsampleUndistFactor;
-	Mat33 K;
-	VecX parsOrg;
+	Mat33 K;		// K是与w,h对应的内参矩阵
+	VecX parsOrg;	// fx, fy, cx, cy, p共5个相机内参
 	bool valid;
 	bool passthrough;
 

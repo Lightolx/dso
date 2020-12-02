@@ -54,8 +54,8 @@ PhotometricUndistorter::PhotometricUndistorter(
 		int w_, int h_)
 {
 	valid=false;
-	vignetteMap=0;
-	vignetteMapInv=0;
+	vignetteMap=nullptr;
+	vignetteMapInv=nullptr;
 	w = w_;
 	h = h_;
 	output = new ImageAndExposure(w,h);
@@ -95,7 +95,7 @@ PhotometricUndistorter::PhotometricUndistorter(
 
         for(int i=0;i<GDepth;i++) G[i] = Gvec[i];
 
-        for(int i=0;i<GDepth-1;i++)
+        for(int i=0;i<GDepth-1;i++) // 这里是检查一下是否是递增排列的
 		{
 			if(G[i+1] <= G[i])
 			{
@@ -106,10 +106,11 @@ PhotometricUndistorter::PhotometricUndistorter(
 
 		float min=G[0];
         float max=G[GDepth-1];
+        // 万一给进来的数组的范围不是0~255, 在这里把它们映射到0~255
         for(int i=0;i<GDepth;i++) G[i] = 255.0 * (G[i] - min) / (max-min);			// make it to 0..255 => 0..255.
 	}
 
-	if(setting_photometricCalibration==0)
+	if(setting_photometricCalibration==0)   // 如果没给的话，直接用0~255代替
 	{
         for(int i=0;i<GDepth;i++) G[i]=255.0f*i/(float)(GDepth-1);
 	}
@@ -117,12 +118,14 @@ PhotometricUndistorter::PhotometricUndistorter(
 
 
 	printf("Reading Vignette Image from %s\n",vignetteImage.c_str());
+	// 这里之所以由有16和8两个是因为不确定读入的是8UC1还是16UC1，所以在这里自动判断下。
+	// 最终返回的是unsigned short的数组或者unsigned char的数组
 	MinimalImage<unsigned short>* vm16 = IOWrap::readImageBW_16U(vignetteImage.c_str());
 	MinimalImageB* vm8 = IOWrap::readImageBW_8U(vignetteImage.c_str());
 	vignetteMap = new float[w*h];
 	vignetteMapInv = new float[w*h];
 
-	if(vm16 != 0)
+	if(vm16 != nullptr)
 	{
 		if(vm16->w != w ||vm16->h != h)
 		{
@@ -134,13 +137,13 @@ PhotometricUndistorter::PhotometricUndistorter(
 		}
 
 		float maxV=0;
-		for(int i=0;i<w*h;i++)
+		for(int i=0;i<w*h;i++)  // 遍历，找出maxV
 			if(vm16->at(i) > maxV) maxV = vm16->at(i);
 
-		for(int i=0;i<w*h;i++)
+		for(int i=0;i<w*h;i++)  // 把vm16的值拷贝到vignetteMap中，除maxV是为了normalize()
 			vignetteMap[i] = vm16->at(i) / maxV;
 	}
-	else if(vm8 != 0)
+	else if(vm8 != nullptr)
 	{
 		if(vm8->w != w ||vm8->h != h)
 		{
@@ -155,7 +158,7 @@ PhotometricUndistorter::PhotometricUndistorter(
 		for(int i=0;i<w*h;i++)
 			if(vm8->at(i) > maxV) maxV = vm8->at(i);
 
-		for(int i=0;i<w*h;i++)
+		for(int i=0;i<w*h;i++)  // 一样，如果图像是8UC1而不是16UC1的，则把vm8的值拷贝到vignetteMap中
 			vignetteMap[i] = vm8->at(i) / maxV;
 	}
 	else
@@ -166,12 +169,12 @@ PhotometricUndistorter::PhotometricUndistorter(
 		return;
 	}
 
-	if(vm16!=0) delete vm16;
-	if(vm8!=0) delete vm8;
+	if(vm16!= nullptr) delete vm16;
+	if(vm8!= nullptr) delete vm8;
 
 
 	for(int i=0;i<w*h;i++)
-		vignetteMapInv[i] = 1.0f / vignetteMap[i];
+		vignetteMapInv[i] = 1.0f / vignetteMap[i];  // 每个值取反
 
 
 	printf("Successfully read photometric calibration!\n");
@@ -265,7 +268,8 @@ Undistort::~Undistort()
 
 Undistort* Undistort::getUndistorterForFile(std::string configFilename, std::string gammaFilename, std::string vignetteFilename)
 {
-	printf("Reading Calibration from file %s",configFilename.c_str());
+    // Step1: 读取相机模型(pinhole或者ATAN等等)、内参K及图像宽高
+	printf("Reading Calibration from file %s",configFilename.c_str());  // camera.txt
 
 	std::ifstream f(configFilename.c_str());
 	if (!f.good())
@@ -369,8 +373,9 @@ Undistort* Undistort::getUndistorterForFile(std::string configFilename, std::str
         exit(1);
     }
 
+    // Step2:读取光度标定的配置文件，也就是读pcalib.txt文件里面的256个值
 	u->loadPhotometricCalibration(
-				gammaFilename,
+				gammaFilename,    // pcalib.txt文件，用于光度标定
 				"",
 				vignetteFilename);
 
@@ -379,6 +384,7 @@ Undistort* Undistort::getUndistorterForFile(std::string configFilename, std::str
 
 void Undistort::loadPhotometricCalibration(std::string file, std::string noiseImage, std::string vignetteImage)
 {
+    // 这个getOriginalSize()[0]得到的是原始图像的尺寸，因为我们假设vignetteImage和用于定位的原始图像的size是一样的
 	photometricUndist = new PhotometricUndistorter(file, noiseImage, vignetteImage,getOriginalSize()[0], getOriginalSize()[1]);
 }
 
@@ -715,11 +721,11 @@ void Undistort::makeOptimalK_full()
 
 void Undistort::readFromFile(const char* configFileName, int nPars, std::string prefix)
 {
-	photometricUndist=0;
+	photometricUndist=nullptr;
 	valid = false;
 	passthrough=false;
-	remapX = 0;
-	remapY = 0;
+	remapX = nullptr;
+	remapY = nullptr;
 	
 	float outputCalibration[5];
 
@@ -791,7 +797,7 @@ void Undistort::readFromFile(const char* configFileName, int nPars, std::string 
     {
         printf("\n\nFound fx=%f, fy=%f, cx=%f, cy=%f.\n I'm assuming this is the \"relative\" calibration file format,"
                "and will rescale this by image width / height to fx=%f, fy=%f, cx=%f, cy=%f.\n\n",
-               parsOrg[0], parsOrg[1], parsOrg[2], parsOrg[3],
+               parsOrg[0], parsOrg[1], parsOrg[2], parsOrg[3],  // 它的fx,fy,cx,cy的格式比较奇怪，跟图像的长宽有关
                parsOrg[0] * wOrg, parsOrg[1] * hOrg, parsOrg[2] * wOrg - 0.5, parsOrg[3] * hOrg - 0.5 );
 
         // rescale and substract 0.5 offset.
@@ -823,6 +829,7 @@ void Undistort::readFromFile(const char* configFileName, int nPars, std::string 
 		outputCalibration[0] = -3;
         printf("Out: No Rectification\n");
 	}
+	// 这5个参数是Pangolin可视化的fx, fy, cx, cy，只用于可视化，与算法无关
 	else if(std::sscanf(l3.c_str(), "%f %f %f %f %f", &outputCalibration[0], &outputCalibration[1], &outputCalibration[2], &outputCalibration[3], &outputCalibration[4]) == 5)
 	{
 		printf("Out: %f %f %f %f %f\n",
@@ -837,7 +844,7 @@ void Undistort::readFromFile(const char* configFileName, int nPars, std::string 
 	}
 
 
-	// l4
+	// l4，这两个参数是Pangolin可视化图片的大小，一般设为640*480
 	if(std::sscanf(l4.c_str(), "%d %d", &w, &h) == 2)
 	{
 		if(benchmarkSetting_width != 0)
@@ -894,7 +901,7 @@ void Undistort::readFromFile(const char* configFileName, int nPars, std::string 
 
 
 		K.setIdentity();
-        K(0,0) = outputCalibration[0] * w;
+        K(0,0) = outputCalibration[0] * w;  // 看这里设置K矩阵
         K(1,1) = outputCalibration[1] * h;
         K(0,2) = outputCalibration[2] * w - 0.5;
         K(1,2) = outputCalibration[3] * h - 0.5;
@@ -911,10 +918,11 @@ void Undistort::readFromFile(const char* configFileName, int nPars, std::string 
 	for(int y=0;y<h;y++)
 		for(int x=0;x<w;x++)
 		{
-			remapX[x+y*w] = x;
+			remapX[x+y*w] = x;  // 这里是初始化每个点的uv坐标，很明显第x行的u都是u，第y列的v都是v
 			remapY[x+y*w] = y;
 		}
 
+    // 从大图缩为小图，用于可视化显示计算从大图到小图的像素映射矩阵
 	distortCoordinates(remapX, remapY, remapX, remapY, h*w);
 
 
@@ -924,7 +932,7 @@ void Undistort::readFromFile(const char* configFileName, int nPars, std::string 
 			// make rounding resistant.
 			float ix = remapX[x+y*w];
 			float iy = remapY[x+y*w];
-
+            // 这里是处理下靠近图像4个边界的值
 			if(ix == 0) ix = 0.001;
 			if(iy == 0) iy = 0.001;
 			if(ix == wOrg-1) ix = wOrg-1.001;

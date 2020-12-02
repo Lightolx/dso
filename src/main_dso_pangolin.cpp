@@ -365,8 +365,8 @@ int main( int argc, char** argv )
 	reader->setGlobalCalibration();
 
 
-
-	if(setting_photometricCalibration > 0 && reader->getPhotometricGamma() == 0)
+    // 检查是否正确读入内参K及光度标定参数
+	if(setting_photometricCalibration > 0 && reader->getPhotometricGamma() == nullptr)
 	{
 		printf("ERROR: dont't have photometric calibation. Need to use commandline options mode=1 or mode=2 ");
 		exit(1);
@@ -377,7 +377,7 @@ int main( int argc, char** argv )
 
 	int lstart=start;
 	int lend = end;
-	int linc = 1;
+	int linc = 1;   // 步长，每间隔多少帧读取一次，默认是每帧都读进来
 	if(reverse)
 	{
 		printf("REVERSE!!!!");

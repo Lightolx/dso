@@ -65,7 +65,7 @@ inline int getdir (std::string dir, std::vector<std::string> &files)
 
     std::sort(files.begin(), files.end());
 
-    if(dir.at( dir.length() - 1 ) != '/') dir = dir+"/";
+    if(dir.at( dir.length() - 1 ) != '/') dir = dir+"/";    // 帮忙加上最后一个反斜杠“/”
 	for(unsigned int i=0;i<files.size();i++)
 	{
 		if(files[i].at(0) != '/')
@@ -104,14 +104,14 @@ class ImageFolderReader
 public:
 	ImageFolderReader(std::string path, std::string calibFile, std::string gammaFile, std::string vignetteFile)
 	{
-		this->path = path;
-		this->calibfile = calibFile;
+		this->path = path;              // png图像序列
+		this->calibfile = calibFile;    // 内参K及图像宽高
 
 #if HAS_ZIPLIB
 		ziparchive=0;
 		databuffer=0;
 #endif
-
+        // 靠后缀是否为".zip"来判断输入的是zip压缩包还是图像序列帧
 		isZipped = (path.length()>4 && path.substr(path.length()-4) == ".zip");
 
 
@@ -149,13 +149,13 @@ public:
 		else
 			getdir (path, files);
 
-
+        // calibFile是内参K及图像宽高，gammaFile用于光度标定
 		undistort = Undistort::getUndistorterForFile(calibFile, gammaFile, vignetteFile);
 
 
-		widthOrg = undistort->getOriginalSize()[0];
+		widthOrg = undistort->getOriginalSize()[0];     // 这两个是输入图像的宽高
 		heightOrg = undistort->getOriginalSize()[1];
-		width=undistort->getSize()[0];
+		width=undistort->getSize()[0];      // 这两个是用于可视化的Pangolin上两张图的宽高
 		height=undistort->getSize()[1];
 
 
@@ -196,7 +196,7 @@ public:
 		int w_out, h_out;
 		Eigen::Matrix3f K;
 		getCalibMono(K, w_out, h_out);
-		setGlobalCalib(w_out, h_out, K);
+		setGlobalCalib(w_out, h_out, K);    // 这里是在做图像金字塔，并且计算每一层金字塔的宽高和内参K
 	}
 
 	int getNumImages()
@@ -232,7 +232,7 @@ public:
 
 	inline float* getPhotometricGamma()
 	{
-		if(undistort==0 || undistort->photometricUndist==0) return 0;
+		if(undistort==nullptr || undistort->photometricUndist==nullptr) return nullptr;
 		return undistort->photometricUndist->getG();
 	}
 
