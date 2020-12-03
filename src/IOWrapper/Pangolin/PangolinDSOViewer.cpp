@@ -66,7 +66,7 @@ PangolinDSOViewer::PangolinDSOViewer(int w, int h, bool startRunThread)
 	needReset = false;
 
 
-    if(startRunThread)
+    if(startRunThread)  // 一般构造的时候都设置为false了，否则直接把当前线程堵死
         runThread = boost::thread(&PangolinDSOViewer::run, this);
 
 }

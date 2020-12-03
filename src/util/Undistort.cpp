@@ -219,7 +219,7 @@ void PhotometricUndistorter::processFrame(T* image_in, float exposure_time, floa
 	int wh=w*h;
     float* data = output->image;
 	assert(output->w == w && output->h == h);
-	assert(data != 0);
+	assert(data != nullptr);    // output这个类在构造函数中就为double数组声明了空间，所以数组首地址不会为空指针
 
 
 	if(!valid || exposure_time <= 0 || setting_photometricCalibration==0) // disable full photometric calibration.
@@ -235,13 +235,13 @@ void PhotometricUndistorter::processFrame(T* image_in, float exposure_time, floa
 	{
 		for(int i=0; i<wh;i++)
 		{
-			data[i] = G[image_in[i]];
+			data[i] = G[image_in[i]];   // 在这里可以看到，对于image_in的每个灰度值，都会由G()映射成一个新的值
 		}
 
 		if(setting_photometricCalibration==2)
 		{
 			for(int i=0; i<wh;i++)
-				data[i] *= vignetteMapInv[i];
+				data[i] *= vignetteMapInv[i];   // 在这里可能还会跟光度标定图片点乘
 		}
 
 		output->exposure_time = exposure_time;
@@ -249,7 +249,7 @@ void PhotometricUndistorter::processFrame(T* image_in, float exposure_time, floa
 	}
 
 
-	if(!setting_useExposure)
+	if(!setting_useExposure)    // 如果指定不使用曝光时间的话，那么就将exposure_time设定为定值1.0
 		output->exposure_time = 1;
 
 }
@@ -391,24 +391,25 @@ void Undistort::loadPhotometricCalibration(std::string file, std::string noiseIm
 template<typename T>
 ImageAndExposure* Undistort::undistort(const MinimalImage<T>* image_raw, float exposure, double timestamp, float factor) const
 {
-	if(image_raw->w != wOrg || image_raw->h != hOrg)
+	if(image_raw->w != wOrg || image_raw->h != hOrg)    // 这里是保证读入图像的宽高与配置文件是一样的
 	{
 		printf("Undistort::undistort: wrong image size (%d %d instead of %d %d) \n", image_raw->w, image_raw->h, w, h);
 		exit(1);
 	}
 
-	photometricUndist->processFrame<T>(image_raw->data, exposure, factor);
+	photometricUndist->processFrame<T>(image_raw->data, exposure, factor);  // exposure = 1.0, timestamp = 0.0, factor = 1.0
 	ImageAndExposure* result = new ImageAndExposure(w, h, timestamp);
+    // 这里只是copy exposure_time，下面才是copy像素值，而且不是普通的copy，是从大图resize到小图
 	photometricUndist->output->copyMetaTo(*result);
 
-	if (!passthrough)
+	if (!passthrough)   // 从(1080, 720)的大图resize到(640,480)的小图，其实跟cv::resize()功能差不多
 	{
 		float* out_data = result->image;
 		float* in_data = photometricUndist->output->image;
 
-		float* noiseMapX=0;
-		float* noiseMapY=0;
-		if(benchmark_varNoise>0)
+		float* noiseMapX=nullptr;
+		float* noiseMapY=nullptr;
+		if(benchmark_varNoise>0)    // false，不要人为加噪声
 		{
 			int numnoise=(benchmark_noiseGridsize+8)*(benchmark_noiseGridsize+8);
 			noiseMapX=new float[numnoise];
@@ -424,9 +425,11 @@ ImageAndExposure* Undistort::undistort(const MinimalImage<T>* image_raw, float e
 		}
 
 
-		for(int idx = w*h-1;idx>=0;idx--)
+		for(int idx = w*h-1;idx>=0;idx--)   // 遍历640*480的每一个像素值
 		{
 			// get interp. values
+            // 比如idx = 30 * 640 + 55，那么xx,yy就表示在小图(640,480)的点[30, 55]处应该取大图的[xx,yy]处的像素值
+            // 而xx,yy很可能不是整数，那么下面就会双线性插值该点的像素
 			float xx = remapX[idx];
 			float yy = remapY[idx];
 
@@ -462,7 +465,7 @@ ImageAndExposure* Undistort::undistort(const MinimalImage<T>* image_raw, float e
 				// get array base pointer
 				const float* src = in_data + xxi + yyi * wOrg;
 
-				// interpolate (bilinear)
+				// interpolate (bilinear)   // 对角双线性插值，和svo里一样的逻辑
 				out_data[idx] =  xxyy * src[1+wOrg]
 									+ (yy-xxyy) * src[wOrg]
 									+ (xx-xxyy) * src[1]
@@ -482,7 +485,7 @@ ImageAndExposure* Undistort::undistort(const MinimalImage<T>* image_raw, float e
 		memcpy(result->image, photometricUndist->output->image, sizeof(float)*w*h);
 	}
 
-	applyBlurNoise(result->image);
+	applyBlurNoise(result->image);  // 人为给图像加噪声，有点迷啊，不过一般设置为不使用这个函数
 
 	return result;
 }

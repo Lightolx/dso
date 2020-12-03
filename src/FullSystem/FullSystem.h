@@ -156,7 +156,7 @@ public:
 	bool isLost;
 	bool initFailed;
 	bool initialized;
-	bool linearizeOperation;
+	bool linearizeOperation;	// 依次读取离线数据，不要求实时运行
 
 
 	void setGammaFunction(float* BInv);

@@ -68,7 +68,7 @@ FullSystem::FullSystem()
 {
 
 	int retstat =0;
-	if(setting_logStuff)
+	if(setting_logStuff)    // false, 只是一些是否输出log、输出哪些log的设置
 	{
 
 		retstat += system("rm -rf logs");
@@ -116,7 +116,7 @@ FullSystem::FullSystem()
 	}
 	else
 	{
-		nullspacesLog=0;
+		nullspacesLog=0;    // 全是一些输出流ofstream*
 		variancesLog=0;
 		DiagonalLog=0;
 		eigenALog=0;
@@ -130,7 +130,7 @@ FullSystem::FullSystem()
 
 
 
-	selectionMap = new float[wG[0]*hG[0]];
+	selectionMap = new float[wG[0]*hG[0]];  // 图像金字塔第一层的宽高，一般是640*480
 
 	coarseDistanceMap = new CoarseDistanceMap(wG[0], hG[0]);
 	coarseTracker = new CoarseTracker(wG[0], hG[0]);
@@ -147,14 +147,14 @@ FullSystem::FullSystem()
 	statistics_numMargResFwd = 0;
 	statistics_numMargResBwd = 0;
 
-	lastCoarseRMSE.setConstant(100);
+	lastCoarseRMSE.setConstant(100);    // Eigen::Vector5d的每一行都fix为100
 
 	currentMinActDist=2;
 	initialized=false;
 
 
 	ef = new EnergyFunctional();
-	ef->red = &this->treadReduce;
+	ef->red = &this->treadReduce;   // 把System的treadReduce按引用传递给ef->red
 
 	isLost=false;
 	initFailed=false;
@@ -164,6 +164,7 @@ FullSystem::FullSystem()
 
 	linearizeOperation=true;
 	runMapping=true;
+    // 额外开启一个Mapping线程，专门用于建图，不过这里怎么跟ORB_SLAM一样，不显式指定这条线程detach()
 	mappingThread = boost::thread(&FullSystem::mappingLoop, this);
 	lastRefStopID=0;
 
@@ -215,7 +216,7 @@ void FullSystem::setOriginalCalib(const VecXf &originalCalib, int originalW, int
 
 void FullSystem::setGammaFunction(float* BInv)
 {
-	if(BInv==0) return;
+	if(BInv==nullptr) return;
 
 	// copy BInv.
 	memcpy(Hcalib.Binv, BInv, sizeof(float)*256);
@@ -225,7 +226,7 @@ void FullSystem::setGammaFunction(float* BInv)
 	for(int i=1;i<255;i++)
 	{
 		// find val, such that Binv[val] = i.
-		// I dont care about speed for this, so do it the stupid way.
+		// I dont care about speed for this, so do it the stupid way.哈哈，承认自己循环遍历
 
 		for(int s=1;s<255;s++)
 		{
@@ -236,7 +237,7 @@ void FullSystem::setGammaFunction(float* BInv)
 			}
 		}
 	}
-	Hcalib.B[0] = 0;
+	Hcalib.B[0] = 0;        // 这里强制指定两个临界值0,255
 	Hcalib.B[255] = 255;
 }
 
@@ -1020,7 +1021,7 @@ void FullSystem::blockUntilMappingIsFinished()
 	trackedFrameSignal.notify_all();
 	lock.unlock();
 
-	mappingThread.join();
+	mappingThread.join();   // 这里设置为join()是为了等mappintThread结束，只有等它完全结束后主线程才会退出
 
 }
 

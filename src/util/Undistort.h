@@ -60,7 +60,7 @@ private:
 	float* vignetteMap;
 	float* vignetteMapInv;
 	int w,h;
-	bool valid;
+	bool valid; // Successfully read photometric calibration! 表示成功读入了光度标定文件
 };
 
 
@@ -88,12 +88,12 @@ public:
 	PhotometricUndistorter* photometricUndist;
 
 protected:
-    int w, h, wOrg, hOrg, wUp, hUp;		// wOrg, hOrg是图像原始尺寸; w, h是可视化时图片的宽高
+    int w, h, wOrg, hOrg, wUp, hUp;		// wOrg, hOrg是图像原始尺寸; w, h是可视化时图片的宽高，也是算法实际使用的图像尺寸(640,480)
     int upsampleUndistFactor;
 	Mat33 K;		// K是与w,h对应的内参矩阵
 	VecX parsOrg;	// fx, fy, cx, cy, p共5个相机内参
-	bool valid;
-	bool passthrough;
+	bool valid;     // 表示顺利读入了内参K等参数
+	bool passthrough;   // 说明输入图像就是640*480的，算法不用强行resize到640*480
 
 	float* remapX;
 	float* remapY;

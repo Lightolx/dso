@@ -114,7 +114,7 @@ int   setting_minGoodResForMarg=4;
 // 0 = nothing.
 // 1 = apply inv. response.
 // 2 = apply inv. response & remove V.
-int setting_photometricCalibration = 2;
+int setting_photometricCalibration = 2; // 等于0的话表示不需要光度标定文件，不会进行在线光度标定
 bool setting_useExposure = true;
 float setting_affineOptModeA = 1e12; //-1: fix. >=0: optimize (with prior, if > 0).
 float setting_affineOptModeB = 1e8; //-1: fix. >=0: optimize (with prior, if > 0).

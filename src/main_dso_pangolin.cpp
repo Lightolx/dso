@@ -366,6 +366,7 @@ int main( int argc, char** argv )
 
 
     // 检查是否正确读入内参K及光度标定参数
+    // 需要进行在线光度标定，却没有读入标定文件
 	if(setting_photometricCalibration > 0 && reader->getPhotometricGamma() == nullptr)
 	{
 		printf("ERROR: dont't have photometric calibation. Need to use commandline options mode=1 or mode=2 ");
@@ -378,7 +379,7 @@ int main( int argc, char** argv )
 	int lstart=start;
 	int lend = end;
 	int linc = 1;   // 步长，每间隔多少帧读取一次，默认是每帧都读进来
-	if(reverse)
+	if(reverse)     // slam如果把视频流反序的话效果会好点？
 	{
 		printf("REVERSE!!!!");
 		lstart=end-1;
@@ -391,7 +392,7 @@ int main( int argc, char** argv )
 
 
 	FullSystem* fullSystem = new FullSystem();
-	fullSystem->setGammaFunction(reader->getPhotometricGamma());
+	fullSystem->setGammaFunction(reader->getPhotometricGamma());    // 读取pcalib.txt里面的256个值
 	fullSystem->linearizeOperation = (playbackSpeed==0);
 
 
@@ -400,7 +401,7 @@ int main( int argc, char** argv )
 
 
 
-    IOWrap::PangolinDSOViewer* viewer = 0;
+    IOWrap::PangolinDSOViewer* viewer = nullptr;
 	if(!disableAllDisplay)
     {
         viewer = new IOWrap::PangolinDSOViewer(wG[0],hG[0], false);
@@ -409,13 +410,14 @@ int main( int argc, char** argv )
 
 
 
-    if(useSampleOutput)
+    if(useSampleOutput)     // false，不要输出其它的log
         fullSystem->outputWrapper.push_back(new IOWrap::SampleOutputWrapper());
 
 
 
 
     // to make MacOS happy: run this in dedicated thread -- and use this one to run the GUI.
+    // 之所以不把VO放到主线程而另一起一条线程，是因为在MacOS中可视化必须放在主线程，所以VO只能放到其它线程了
     std::thread runthread([&]() {
         std::vector<int> idsToPlay;
         std::vector<double> timesToPlayAt;
@@ -473,7 +475,7 @@ int main( int argc, char** argv )
 
 
             bool skipFrame=false;
-            if(playbackSpeed!=0)
+            if(playbackSpeed!=0)    // 不要加速
             {
                 struct timeval tv_now; gettimeofday(&tv_now, NULL);
                 double sSinceStart = sInitializerOffset + ((tv_now.tv_sec-tv_start.tv_sec) + (tv_now.tv_usec-tv_start.tv_usec)/(1000.0f*1000.0f));
@@ -488,25 +490,28 @@ int main( int argc, char** argv )
             }
 
 
-
-            if(!skipFrame) fullSystem->addActiveFrame(img, i);
-
-
+            // 不用skipFrame，每一帧都读进去，否则帧率就会低于实际值
+            if(!skipFrame) fullSystem->addActiveFrame(img, i);  // GrabImage(), VO主函数
 
 
+
+            // 当前图像用完就扔掉，可以看见的确就是个VO，根本不打算做loop closure
             delete img;
 
+            // 如果初始化失败了，那么就重启整个系统，再来一轮初始化
             if(fullSystem->initFailed || setting_fullResetRequested)
             {
                 if(ii < 250 || setting_fullResetRequested)
                 {
                     printf("RESETTING!\n");
 
+                    // 这些outputWrapper都是些输出模块，跟算法本身没有关系
                     std::vector<IOWrap::Output3DWrapper*> wraps = fullSystem->outputWrapper;
                     delete fullSystem;
 
                     for(IOWrap::Output3DWrapper* ow : wraps) ow->reset();
 
+                    // 重新构造System
                     fullSystem = new FullSystem();
                     fullSystem->setGammaFunction(reader->getPhotometricGamma());
                     fullSystem->linearizeOperation = (playbackSpeed==0);
@@ -521,11 +526,11 @@ int main( int argc, char** argv )
             if(fullSystem->isLost)
             {
                     printf("LOST!!\n");
-                    break;
+                    break;  // lost了就直接跪了，也没有relocalization模式，不指望找得回来了
             }
 
         }
-        fullSystem->blockUntilMappingIsFinished();
+        fullSystem->blockUntilMappingIsFinished();  // 这里是等一下Mapping线程结束，然后再结束整个系统
         clock_t ended = clock();
         struct timeval tv_end;
         gettimeofday(&tv_end, NULL);
@@ -564,9 +569,10 @@ int main( int argc, char** argv )
     });
 
 
-    if(viewer != 0)
+    if(viewer != nullptr)
         viewer->run();
 
+    // 其实根本走不到下面吧，viewer->run()直接把主线程堵死了
     runthread.join();
 
 	for(IOWrap::Output3DWrapper* ow : fullSystem->outputWrapper)

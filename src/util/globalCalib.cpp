@@ -47,7 +47,8 @@ namespace dso
 		int wlvl=w;
 		int hlvl=h;
 		pyrLevelsUsed=1;
-		while(wlvl%2==0 && hlvl%2==0 && wlvl*hlvl > 5000 && pyrLevelsUsed < PYR_LEVELS)
+		// 这里是不停地resize，得到更高层的图像
+		while(wlvl%2==0 && hlvl%2==0 && wlvl*hlvl > 5000 && pyrLevelsUsed < PYR_LEVELS) // 最高不过6层金字塔
 		{
 			wlvl /=2;
 			hlvl /=2;
@@ -64,7 +65,7 @@ namespace dso
 		if(pyrLevelsUsed < 3)
 		{
 			printf("\n\n===============WARNING!===================\n "
-					"I need higher resolution.\n"
+					"I need higher resolution.\n"  // 这里是在抱怨输入图像分辨率太低了
 					"I will probably segfault.\n");
 		}
 
@@ -84,6 +85,7 @@ namespace dso
 		cxiG[0] = KiG[0](0,2);
 		cyiG[0] = KiG[0](1,2);
 
+		// 这里是计算每一层的图像宽高及内参矩阵K
 		for (int level = 1; level < pyrLevelsUsed; ++ level)
 		{
 			wG[level] = w >> level;

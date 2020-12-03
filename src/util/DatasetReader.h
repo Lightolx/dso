@@ -283,6 +283,7 @@ private:
 	ImageAndExposure* getImage_internal(int id, int unused)
 	{
 		MinimalImageB* minimg = getImageRaw_internal(id, 0);
+		// 因为没有读入time.txt，所以exposures.size()和timestamps.size()都为0
 		ImageAndExposure* ret2 = undistort->undistort<unsigned char>(
 				minimg,
 				(exposures.size() == 0 ? 1.0f : exposures[id]),
