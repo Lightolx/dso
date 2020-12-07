@@ -163,24 +163,28 @@ typedef Eigen::Matrix<double,14,1> Vec14;
 
 
 // transforms points from one frame to another.
+// 把i帧下的灰度变换到j帧下，如果按照式(4)理解的话，它们就是式(4)展开后的系数a,b，即
+// a = tj*exp(aj) / ti*exp(ai), b = bj - a*bi
+// 但是作者非要给a加上一个指数变换，即公式exp(-a)*(I-b)，那么按照这一种方式理解的话，
+// a = -log[tj*exp(aj) / ti*exp(ai)], b = bj - a*bi，与上面相比只是多了个-log
 struct AffLight
 {
 	AffLight(double a_, double b_) : a(a_), b(b_) {};
 	AffLight() : a(0), b(0) {};
 
-	// Affine Parameters:
+	// Affine Parameters:, 见paper2.2节，式(4)，不过注意下这里的
 	double a,b;	// I_frame = exp(a)*I_global + b. // I_global = exp(-a)*(I_frame - b).
 
 	static Vec2 fromToVecExposure(float exposureF, float exposureT, AffLight g2F, AffLight g2T)
 	{
-		if(exposureF==0 || exposureT==0)
+		if(exposureF==0 || exposureT==0)    // 如果没给曝光时间，那就设置为1s
 		{
 			exposureT = exposureF = 1;
 			//printf("got exposure value of 0! please choose the correct model.\n");
 			//assert(setting_brightnessTransferFunc < 2);
 		}
 
-		double a = exp(g2T.a-g2F.a) * exposureT / exposureF;
+		double a = exp(g2T.a-g2F.a) * exposureT / exposureF;    // 式(4)
 		double b = g2T.b - a*g2F.b;
 		return Vec2(a,b);
 	}

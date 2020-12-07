@@ -811,17 +811,19 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 	FrameHessian* fh = new FrameHessian();
 	FrameShell* shell = new FrameShell();
 	shell->camToWorld = SE3(); 		// no lock required, as fh is not used anywhere yet.
-	shell->aff_g2l = AffLight(0,0);
-    shell->marginalizedAt = shell->id = allFrameHistory.size();
-    shell->timestamp = image->timestamp;
-    shell->incoming_id = id;
+	// 初始pose设为Identity()
+//	std::cout << "shell->camToWorld is\n" << shell->camToWorld.matrix() << std::endl;
+	shell->aff_g2l = AffLight(0,0);     // 图像灰度矫正系数(a,b)设置为(0,0)
+    shell->marginalizedAt = shell->id = allFrameHistory.size(); // 这个id也类似于mnTotalID，allFrameHistory.size()作为id使用
+    shell->timestamp = image->timestamp;    // 图像时间戳
+    shell->incoming_id = id;    // 离线读取图片的id，表示已经DatasetReader.files中的第id张图
 	fh->shell = shell;
-	allFrameHistory.push_back(shell);
+	allFrameHistory.push_back(shell);   // 存储了所有的历史帧
 
 
 	// =========================== make Images / derivatives etc. =========================
 	fh->ab_exposure = image->exposure_time;
-    fh->makeImages(image->image, &Hcalib);
+    fh->makeImages(image->image, &Hcalib);  // 计算金字塔每一层每个像素的I,du,dv
 
 
 
@@ -829,19 +831,19 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 	if(!initialized)
 	{
 		// use initializer!
-		if(coarseInitializer->frameID<0)	// first frame set. fh is kept by coarseInitializer.
+		if(coarseInitializer->frameID<0)	// first frame set. fh is kept by coarseInitializer.还没有帧送进来过
 		{
 
 			coarseInitializer->setFirst(&Hcalib, fh);
 		}
-		else if(coarseInitializer->trackFrame(fh, outputWrapper))	// if SNAPPED
+		else if(coarseInitializer->trackFrame(fh, outputWrapper))	// if SNAPPED, 读入了第1帧了，尝试track第2帧进行初始化
 		{
 
 			initializeFromInitializer(fh);
 			lock.unlock();
-			deliverTrackedFrame(fh, true);
+			deliverTrackedFrame(fh, true);  // 实现多线程地图像数据输入
 		}
-		else
+		else    // coarseInitializer->trackFrame(fh, outputWrapper)返回false，说明track第2帧失败，那么就delete这个第2帧，再继续用第3帧与第1帧初始化
 		{
 			// if still initializing
 			fh->shell->poseValid = false;

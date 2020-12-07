@@ -81,7 +81,7 @@ public:
 
 
 	Eigen::Vector2f projectedTo[MAX_RES_PER_POINT];
-	Vec3f centerProjectedTo;
+	Vec3f centerProjectedTo;    // todo::前两位是uv,第3位是depth,这里存疑
 
 	~PointFrameResidual();
 	PointFrameResidual();

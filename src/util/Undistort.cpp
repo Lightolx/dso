@@ -233,6 +233,7 @@ void PhotometricUndistorter::processFrame(T* image_in, float exposure_time, floa
 	}
 	else
 	{
+	    // 见公式(3)，先由G()^-1反映射，再除以V(x)，经过这两步之后得到的就是场景的真实灰度(简单点理解我们假设曝光时间都为1s)
 		for(int i=0; i<wh;i++)
 		{
 			data[i] = G[image_in[i]];   // 在这里可以看到，对于image_in的每个灰度值，都会由G()映射成一个新的值
@@ -397,6 +398,7 @@ ImageAndExposure* Undistort::undistort(const MinimalImage<T>* image_raw, float e
 		exit(1);
 	}
 
+	// 这个函数执行式(3)，对image_raw进行光度矫正，结果存储在photometricUndist->output->image中
 	photometricUndist->processFrame<T>(image_raw->data, exposure, factor);  // exposure = 1.0, timestamp = 0.0, factor = 1.0
 	ImageAndExposure* result = new ImageAndExposure(w, h, timestamp);
     // 这里只是copy exposure_time，下面才是copy像素值，而且不是普通的copy，是从大图resize到小图
@@ -485,7 +487,7 @@ ImageAndExposure* Undistort::undistort(const MinimalImage<T>* image_raw, float e
 		memcpy(result->image, photometricUndist->output->image, sizeof(float)*w*h);
 	}
 
-	applyBlurNoise(result->image);  // 人为给图像加噪声，有点迷啊，不过一般设置为不使用这个函数
+	applyBlurNoise(result->image);  // 人为给图像加噪声，这里是为了做实验验证算法对噪声的鲁棒性，一般设置为不使用这个函数
 
 	return result;
 }

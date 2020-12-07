@@ -284,6 +284,7 @@ private:
 	{
 		MinimalImageB* minimg = getImageRaw_internal(id, 0);
 		// 因为没有读入time.txt，所以exposures.size()和timestamps.size()都为0
+		// 得到的ret2是经过光度矫正，并且resize()到640*480的图像
 		ImageAndExposure* ret2 = undistort->undistort<unsigned char>(
 				minimg,
 				(exposures.size() == 0 ? 1.0f : exposures[id]),

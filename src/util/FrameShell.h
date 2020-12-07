@@ -45,8 +45,8 @@ public:
 
 	// constantly adapted.
 	SE3 camToWorld;				// Write: TRACKING, while frame is still fresh; MAPPING: only when locked [shellPoseMutex].
-	AffLight aff_g2l;
-	bool poseValid;
+	AffLight aff_g2l;       // 光度映射函数，矫正图像灰度的affine matrix
+	bool poseValid;         // 构造函数中直接初始化为true，有点强悍啊，意味着来了一帧我就有信心必然能算出它的pose
 
 	// statisitcs
 	int statistics_outlierResOnThis;
@@ -64,7 +64,7 @@ public:
 		marginalizedAt=-1;
 		movedByOpt=0;
 		statistics_outlierResOnThis=statistics_goodResOnThis=0;
-		trackingRef=0;
+		trackingRef=nullptr;    // 指向其他FrameShell的指针
 		camToTrackingRef = SE3();
 	}
 };

@@ -730,21 +730,22 @@ void CoarseTracker::debugPlotIDepthMap(float* minID_pt, float* maxID_pt, std::ve
 		std::vector<float> allID;
 		for(int i=0;i<h[lvl]*w[lvl];i++)
 		{
-			if(idepth[lvl][i] > 0)
+			if(idepth[lvl][i] > 0)  // 说明该像素处有depth
 				allID.push_back(idepth[lvl][i]);
 		}
 		std::sort(allID.begin(), allID.end());
 		int n = allID.size()-1;
 
+		// 这部分是在求整张图上深度的最小值与最大值
 		float minID_new = allID[(int)(n*0.05)];
 		float maxID_new = allID[(int)(n*0.95)];
 
 		float minID, maxID;
 		minID = minID_new;
 		maxID = maxID_new;
-		if(minID_pt!=0 && maxID_pt!=0)
+		if(minID_pt!=nullptr && maxID_pt!=nullptr)
 		{
-			if(*minID_pt < 0 || *maxID_pt < 0)
+			if(*minID_pt < 0 || *maxID_pt < 0)  // 如果入参没有赋初值，那么直接将n*0.95处的像素值传给这两个点
 			{
 				*maxID_pt = maxID;
 				*minID_pt = minID;
@@ -753,8 +754,9 @@ void CoarseTracker::debugPlotIDepthMap(float* minID_pt, float* maxID_pt, std::ve
 			{
 
 				// slowly adapt: change by maximum 10% of old span.
-				float maxChange = 0.3*(*maxID_pt - *minID_pt);
+				float maxChange = 0.3*(*maxID_pt - *minID_pt);  // 最大的误差范围不超过30%
 
+				// 如果新的值相对于初值的变化范围没超过30%，说明入参给的深度的最大最小值还是比较准的，就不用更新了，超过了30%的话说明入参给的不准，还是要更新的
 				if(minID < *minID_pt - maxChange)
 					minID = *minID_pt - maxChange;
 				if(minID > *minID_pt + maxChange)
@@ -780,7 +782,7 @@ void CoarseTracker::debugPlotIDepthMap(float* minID_pt, float* maxID_pt, std::ve
 			if(c>255) c=255;
 			mf.at(i) = Vec3b(c,c,c);
 		}
-		int wl = w[lvl];
+		int wl = w[lvl];    // 这里是为了加速，避免第二个循环每次都去访问w[lvl].那么为什么不声明一个零时变量hl呢，因为第一个循环遍历的次数少啊
 		for(int y=3;y<h[lvl]-3;y++)
 			for(int x=3;x<wl-3;x++)
 			{
@@ -788,6 +790,7 @@ void CoarseTracker::debugPlotIDepthMap(float* minID_pt, float* maxID_pt, std::ve
 				float sid=0, nid=0;
 				float* bp = idepth[lvl]+idx;
 
+				// 如果上下左右中全部都有深度
 				if(bp[0] > 0) {sid+=bp[0]; nid++;}
 				if(bp[1] > 0) {sid+=bp[1]; nid++;}
 				if(bp[-1] > 0) {sid+=bp[-1]; nid++;}
@@ -796,6 +799,7 @@ void CoarseTracker::debugPlotIDepthMap(float* minID_pt, float* maxID_pt, std::ve
 
 				if(bp[0] > 0 || nid >= 3)
 				{
+				    // 这里sid/nid是在求周围5个点深度的均值，而除以(maxID-minID)是为了把深度归一化到0~1的范围
 					float id = ((sid / nid)-minID) / ((maxID-minID));
 					mf.setPixelCirc(x,y,makeJet3B(id));
 					//mf.at(idx) = makeJet3B(id);

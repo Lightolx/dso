@@ -55,7 +55,10 @@ public:
 	float idepth_new;
 	Vec2f energy_new;
 
-	float iR;
+    // 该keypoint逆深度的fake gt，真正的gt我们当然是不可能得到的（毕竟又没有depth camera），
+    // 而之所以我们要给这个假造的gt是为了指导逆深度的收敛方向．可以想象，如果我们把这个fake gt设置为该keypoint的10个neighbors的
+    // 逆深度的均值，那么该keypoint的逆深度最终收敛结果就是neighbors的均值，这样整张图上的keypoints的逆深度就会比较平滑
+	float iR;       // iR大概表示idepth regulated?　联系了金字塔各层keypoints的逆深度
 	float iRSumNum;
 
 	float lastHessian;
@@ -65,15 +68,15 @@ public:
 	float maxstep;
 
 	// idx (x+y*w) of closest point one pyramid level above.
-	int parent;
+	int parent;         // 图像上一层离该keypoint最近的keypoint，记为它的parent
 	float parentDist;
 
 	// idx (x+y*w) of up to 10 nearest points in pixel space.
-	int neighbours[10];
+	int neighbours[10];         // 本层金字塔上，离该keypoint1最近的10个keypoints
 	float neighboursDist[10];
 
-	float my_type;
-	float outlierTH;
+	float my_type;      // 表示在多大的cell上提取出的keypoint，可能是d*d，也可能是2d*2d或4d*4d
+	float outlierTH;    // energy超过了多少，表示这个keypoint是个outlier
 };
 
 class CoarseInitializer {
@@ -87,13 +90,13 @@ public:
 	bool trackFrame(FrameHessian* newFrameHessian, std::vector<IOWrap::Output3DWrapper*> &wraps);
 	void calcTGrads(FrameHessian* newFrameHessian);
 
-	int frameID;
+	int frameID;    // 构造函数中初始化为-1
 	bool fixAffine;
 	bool printDebug;
 
-	Pnt* points[PYR_LEVELS];
+	Pnt* points[PYR_LEVELS];    // 第0帧的所有keypoints
 	int numPoints[PYR_LEVELS];
-	AffLight thisToNext_aff;
+	AffLight thisToNext_aff;    // 式(4)中的，把像素的灰度从第0帧变换到第1帧
 	SE3 thisToNext;
 
 
@@ -101,10 +104,10 @@ public:
 	FrameHessian* newFrame;
 private:
 	Mat33 K[PYR_LEVELS];
-	Mat33 Ki[PYR_LEVELS];
+	Mat33 Ki[PYR_LEVELS];   // K.inverse()
 	double fx[PYR_LEVELS];
 	double fy[PYR_LEVELS];
-	double fxi[PYR_LEVELS];
+	double fxi[PYR_LEVELS]; // fx的倒数
 	double fyi[PYR_LEVELS];
 	double cx[PYR_LEVELS];
 	double cy[PYR_LEVELS];

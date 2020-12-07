@@ -94,10 +94,10 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	regWeight = 0.8;//*freeDebugParam4;
 	couplingWeight = 1;//*freeDebugParam5;
 
-	if(!snapped)
+	if(!snapped)    // setFirst()中被设置为了false
 	{
-		thisToNext.translation().setZero();
-		for(int lvl=0;lvl<pyrLevelsUsed;lvl++)
+		thisToNext.translation().setZero();     // thisToNext在setFirst()中置为了单位阵
+		for(int lvl=0;lvl<pyrLevelsUsed;lvl++)  // 重置每一层每个keypoint的iR, iDepth_new, lastHessian
 		{
 			int npts = numPoints[lvl];
 			Pnt* ptsl = points[lvl];
@@ -111,24 +111,29 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	}
 
 
-	SE3 refToNew_current = thisToNext;
+	SE3 refToNew_current = thisToNext;  // 第0帧相对于第1帧的pose
+    // CoarseInitializer的构造函数中，thisToNext_aff的两个光度矫正参数(a,b)都被初始化为了0，也就是这个Affine Matrix是单位阵
 	AffLight refToNew_aff_current = thisToNext_aff;
-
+//    std::cout << "a1 = " << refToNew_aff_current.a << ", b1 = " << refToNew_aff_current.b << std::endl;
+    // 如果两帧的曝光时间均已知的话，那么a就可以初始化为log[(t1*exp(0))/(t0*exp(0))]，也就是
+    // a = log(t1/t0), b = 0，这样就有方程
+    // exp(a)*I0 + b， 就可以把光度从第0帧变换到第1帧
 	if(firstFrame->ab_exposure>0 && newFrame->ab_exposure>0)
 		refToNew_aff_current = AffLight(logf(newFrame->ab_exposure /  firstFrame->ab_exposure),0); // coarse approximation.
-
+		// 因为firstFrame->ab_exposure和newFrame->ab_exposure都设置为了1s，所以其实a,b也都等于0，Affine Matrix仍然是单位阵
+//    std::cout << "a2 = " << refToNew_aff_current.a << ", b2 = " << refToNew_aff_current.b << std::endl;
 
 	Vec3f latestRes = Vec3f::Zero();
-	for(int lvl=pyrLevelsUsed-1; lvl>=0; lvl--)
+	for(int lvl=pyrLevelsUsed-1; lvl>=0; lvl--)     // 两帧图像之间找2d patch匹配，当然是从高层往底层一步步refine
 	{
 
 
 
-		if(lvl<pyrLevelsUsed-1)
-			propagateDown(lvl+1);
+		if(lvl<pyrLevelsUsed-1)     // 如果不是金字塔最顶层（因为最顶层没有上一层，老老实实地从逆深度等于0开始迭代）
+			propagateDown(lvl+1);   // 将当前层所有keypoints的逆深度初始化为上一层的parent的逆深度，加速本层keypoints逆深度的收敛
 
-		Mat88f H,Hsc; Vec8f b,bsc;
-		resetPoints(lvl);
+		Mat88f H,Hsc; Vec8f b,bsc;  // normal equation, 即 H*Δx=b 中的H,b
+		resetPoints(lvl);   // 重置每个keypoint的idepth_new = idepth
 		Vec3f resOld = calcResAndGS(lvl, H, b, Hsc, bsc, refToNew_current, refToNew_aff_current, false);
 		applyStep(lvl);
 
@@ -219,7 +224,7 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 				resOld = resNew;
 				refToNew_aff_current = refToNew_aff_new;
 				refToNew_current = refToNew_new;
-				applyStep(lvl);
+				applyStep(lvl); // 本质上也是一个直接法，求初始化两帧之间的相对pose
 				optReg(lvl);
 				lambda *= 0.5;
 				fails=0;
@@ -325,11 +330,11 @@ void CoarseInitializer::debugPlot(int lvl, std::vector<IOWrap::Output3DWrapper*>
         ow->pushDepthImage(&iRImg);
 }
 
-// calculates residual, Hessian and Hessian-block neede for re-substituting depth.
+// calculates residual, Hessian and Hessian-block needed for re-substituting depth.
 Vec3f CoarseInitializer::calcResAndGS(
 		int lvl, Mat88f &H_out, Vec8f &b_out,
 		Mat88f &H_out_sc, Vec8f &b_out_sc,
-		const SE3 &refToNew, AffLight refToNew_aff,
+		const SE3 &refToNew, AffLight refToNew_aff,     // 两帧之间的相对pose，两帧之间的光度affine matrix
 		bool plot)
 {
 	int wl = w[lvl], hl = h[lvl];
@@ -711,20 +716,24 @@ void CoarseInitializer::propagateUp(int srcLvl)
 
 void CoarseInitializer::propagateDown(int srcLvl)
 {
+    // 因为为这个函数的作用是用本层keypoints的逆深度初始化下一层keypoints的逆深度，所以不能是最底层．（否则它哪来的下一层？）
 	assert(srcLvl>0);
 	// set idepth of target
 
-	int nptst= numPoints[srcLvl-1];
-	Pnt* ptss = points[srcLvl];
-	Pnt* ptst = points[srcLvl-1];
+	int nptst= numPoints[srcLvl-1]; // 下一层的keypoints的数量
+	Pnt* ptss = points[srcLvl];     // 本层的所有keypoints
+	Pnt* ptst = points[srcLvl-1];   // 下一层的所有keypoints
 
-	for(int i=0;i<nptst;i++)
+	for(int i=0;i<nptst;i++)    // 遍历下一层的每个keypoint，赋给其逆深度初值
 	{
-		Pnt* point = ptst+i;
-		Pnt* parent = ptss+point->parent;
+		Pnt* point = ptst+i;                // 待处理的keypoint
+		Pnt* parent = ptss+point->parent;   // 该keypoint的parent
 
+        // trackFrame()一进来，所有keypoints的lastHessian都被初始化成了0，所以直接continue了
+        // std::cout << "parent->isGood = " << parent->isGood << std::endl;
+        // std::cout << "parent->lastHessian = " << parent->lastHessian << std::endl;
 		if(!parent->isGood || parent->lastHessian < 0.1) continue;
-		if(!point->isGood)
+		if(!point->isGood)  // 这什么情况，按道理第0帧提取的keypoints都应该是good的
 		{
 			point->iR = point->idepth = point->idepth_new = parent->iR;
 			point->isGood=true;
@@ -732,6 +741,7 @@ void CoarseInitializer::propagateDown(int srcLvl)
 		}
 		else
 		{
+		    // 在setFirst中，iR都被初始化成了1，lastHessian都被初始化成了0
 			float newiR = (point->iR*point->lastHessian*2 + parent->iR*parent->lastHessian) / (point->lastHessian*2+parent->lastHessian);
 			point->iR = point->idepth = point->idepth_new = newiR;
 		}
@@ -775,50 +785,55 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 	float* statusMap = new float[w[0]*h[0]];
 	bool* statusMapB = new bool[w[0]*h[0]];
 
-	float densities[] = {0.03,0.05,0.15,0.5,1};
+	float densities[] = {0.03,0.05,0.15,0.5,1};     // 金字塔越高层keypoints采样密度越高
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
 	{
 		sel.currentPotential = 3;
 		int npts;
 		if(lvl == 0)
+		    // 在第0层提取keypoints，也包括2d,4d的cell内提取到的keypoints．返回的是keypoints的总数
 			npts = sel.makeMaps(firstFrame, statusMap,densities[lvl]*w[0]*h[0],1,false,2);
 		else
+		    // 在高层提取keypoints，这里的提取就不会扩展到2d,4d的大cell了，而且每个5*5的cell的keypoint梯度阈值都是一样的
+		    // 而在上面的第0层提取时，每个32*32的cell的梯度阈值都是动态变化的，等于g+gth
 			npts = makePixelStatus(firstFrame->dIp[lvl], statusMapB, w[lvl], h[lvl], densities[lvl]*w[0]*h[0]);
 
 
 
-		if(points[lvl] != 0) delete[] points[lvl];
-		points[lvl] = new Pnt[npts];
+		if(points[lvl] != nullptr) delete[] points[lvl];    // 不是空指针就delete指针指向的对象，免得内存泄漏
+		points[lvl] = new Pnt[npts];    // 这里为数组分配大小为npts的空间
 
 		// set idepth map to initially 1 everywhere.
 		int wl = w[lvl], hl = h[lvl];
-		Pnt* pl = points[lvl];
+		Pnt* pl = points[lvl];      // 当前层的keypoints的数组的头指针
 		int nl = 0;
-		for(int y=patternPadding+1;y<hl-patternPadding-2;y++)
+		for(int y=patternPadding+1;y<hl-patternPadding-2;y++)   // patternPadding指原图的border
 		for(int x=patternPadding+1;x<wl-patternPadding-2;x++)
 		{
 			//if(x==2) printf("y=%d!\n",y);
-			if((lvl!=0 && statusMapB[x+y*wl]) || (lvl==0 && statusMap[x+y*wl] != 0))
+			if((lvl!=0 && statusMapB[x+y*wl]) || (lvl==0 && statusMap[x+y*wl] != 0)) // 这个像素提取出了keypoint
 			{
 				//assert(patternNum==9);
-				pl[nl].u = x+0.1;
+				pl[nl].u = x+0.1;       // 这个keypoint的uv
 				pl[nl].v = y+0.1;
-				pl[nl].idepth = 1;
+				pl[nl].idepth = 1;      // keypoint的深度初始化为1
 				pl[nl].iR = 1;
 				pl[nl].isGood=true;
 				pl[nl].energy.setZero();
 				pl[nl].lastHessian=0;
 				pl[nl].lastHessian_new=0;
+                // 在多大的cell上提取出的keypoint．如果当前不是第0层，那么就统一是5*5的cell上的,如果是第0层，那就可能是2d*2d或4d*4d的cell上提出来的
 				pl[nl].my_type= (lvl!=0) ? 1 : statusMap[x+y*wl];
 
-				Eigen::Vector3f* cpt = firstFrame->dIp[lvl] + x + y*w[lvl];
+				Eigen::Vector3f* cpt = firstFrame->dIp[lvl] + x + y*w[lvl]; // 指向该像素的指针
 				float sumGrad2=0;
-				for(int idx=0;idx<patternNum;idx++)
+				for(int idx=0;idx<patternNum;idx++) // 遍历菱形的8个点
 				{
-					int dx = patternP[idx][0];
+					int dx = patternP[idx][0];  // 这个菱形的第idx点的局部uv坐标
 					int dy = patternP[idx][1];
+					// 菱形角点的梯度
 					float absgrad = cpt[dx + dy*w[lvl]].tail<2>().squaredNorm();
-					sumGrad2 += absgrad;
+					sumGrad2 += absgrad;    // 统计菱形角点的梯度和，虽然这个值后面没被用到
 				}
 
 //				float gth = setting_outlierTH * (sqrtf(sumGrad2)+setting_outlierTHSumComponent);
@@ -830,21 +845,22 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 
 
 				nl++;
-				assert(nl <= npts);
+				assert(nl <= npts);     // 这一层构造出的keypoints的总数当然会少于提取出的总数
 			}
 		}
 
 
-		numPoints[lvl]=nl;
+		numPoints[lvl]=nl;  // 这一层构造出的keypoints的总数
 	}
-	delete[] statusMap;
+	delete[] statusMap;     // 指向数组的指针用完就赶紧delete掉，免得内存泄漏
 	delete[] statusMapB;
 
+	// 计算每个keypoint在本层最邻近的10个neighbors以及在上一层最邻近的1个neighbor
 	makeNN();
 
 	thisToNext=SE3();
 	snapped = false;
-	frameID = snappedAt = 0;
+	frameID = snappedAt = 0;    // 此时Initializer已经加入了first frame，因此frameID更新为0
 
 	for(int i=0;i<pyrLevelsUsed;i++)
 		dGrads[i].setZero();
@@ -861,7 +877,7 @@ void CoarseInitializer::resetPoints(int lvl)
 		pts[i].idepth_new = pts[i].idepth;
 
 
-		if(lvl==pyrLevelsUsed-1 && !pts[i].isGood)
+		if(lvl==pyrLevelsUsed-1 && !pts[i].isGood)  // 如果是最高层，而且这个点不是good．（之所以会非good是因为在gaussian-newton迭代中被判定为了outlier）
 		{
 			float snd=0, sn=0;
 			for(int n = 0;n<10;n++)
@@ -873,6 +889,8 @@ void CoarseInitializer::resetPoints(int lvl)
 
 			if(sn > 0)
 			{
+                // 如果这个keypoint不是good，但是它有neighbors，那么就将neighbors的depth的均值赋给它，并且重新设置为good
+                // 当然还要注意下这招仅仅对最高层有效哈，可能是因为最高层keypoints本身数量就很少，所以适当补充点
 				pts[i].isGood=true;
 				pts[i].iR = pts[i].idepth = pts[i].idepth_new = snd/sn;
 			}
@@ -929,13 +947,13 @@ void CoarseInitializer::applyStep(int lvl)
 
 void CoarseInitializer::makeK(CalibHessian* HCalib)
 {
-	w[0] = wG[0];
-	h[0] = hG[0];
+	w[0] = wG[0];   // 640
+	h[0] = hG[0];   // 480
 
 	fx[0] = HCalib->fxl();
 	fy[0] = HCalib->fyl();
-	cx[0] = HCalib->cxl();
-	cy[0] = HCalib->cyl();
+	cx[0] = HCalib->cxl();  // 320
+	cy[0] = HCalib->cyl();  // 240
 
 	for (int level = 1; level < pyrLevelsUsed; ++ level)
 	{
@@ -970,11 +988,11 @@ void CoarseInitializer::makeNN()
 			FLANNPointcloud,2> KDTree;
 
 	// build indices
-	FLANNPointcloud pcs[PYR_LEVELS];
+	FLANNPointcloud pcs[PYR_LEVELS];    // 用pyrLevelsUsed也没问题吧，这里用PYR_LEVELS是因为算法最多只会处理PYR_LEVELS层，也就是6层
 	KDTree* indexes[PYR_LEVELS];
 	for(int i=0;i<pyrLevelsUsed;i++)
 	{
-		pcs[i] = FLANNPointcloud(numPoints[i], points[i]);
+		pcs[i] = FLANNPointcloud(numPoints[i], points[i]);  // 这一层上keypoints的数目，keypoints的指针
 		indexes[i] = new KDTree(2, pcs[i], nanoflann::KDTreeSingleIndexAdaptorParams(5) );
 		indexes[i]->buildIndex();
 	}
@@ -992,41 +1010,42 @@ void CoarseInitializer::makeNN()
 		nanoflann::KNNResultSet<float, int, int> resultSet(nn);
 		nanoflann::KNNResultSet<float, int, int> resultSet1(1);
 
-		for(int i=0;i<npts;i++)
+		for(int i=0;i<npts;i++)     // 遍历当前层的每一个keypoint
 		{
 			//resultSet.init(pts[i].neighbours, pts[i].neighboursDist );
 			resultSet.init(ret_index, ret_dist);
 			Vec2f pt = Vec2f(pts[i].u,pts[i].v);
+			// 在当前层上找10个最近邻neighbors
 			indexes[lvl]->findNeighbors(resultSet, (float*)&pt, nanoflann::SearchParams());
 			int myidx=0;
 			float sumDF = 0;
-			for(int k=0;k<nn;k++)
+			for(int k=0;k<nn;k++)   // 遍历10个neighbor
 			{
-				pts[i].neighbours[myidx]=ret_index[k];
-				float df = expf(-ret_dist[k]*NNDistFactor);
+				pts[i].neighbours[myidx]=ret_index[k];      // 该neightbor在当前层keypoints序列中的id
+				float df = expf(-ret_dist[k]*NNDistFactor); // pts[i]到该neighbor的像素距离
 				sumDF += df;
 				pts[i].neighboursDist[myidx]=df;
-				assert(ret_index[k]>=0 && ret_index[k] < npts);
+				assert(ret_index[k]>=0 && ret_index[k] < npts); // id当然大于等于0并且小于keypoints总数
 				myidx++;
 			}
 			for(int k=0;k<nn;k++)
-				pts[i].neighboursDist[k] *= 10/sumDF;
+				pts[i].neighboursDist[k] *= 10/sumDF;   // pts[i]到每个neighbor的像素距离都乘上一个系数
 
 
-			if(lvl < pyrLevelsUsed-1 )
+			if(lvl < pyrLevelsUsed-1 )  // 如果不是最高层，再在上一层寻找离它最近的keypoint，记为该它的parent
 			{
 				resultSet1.init(ret_index, ret_dist);
-				pt = pt*0.5f-Vec2f(0.25f,0.25f);
+				pt = pt*0.5f-Vec2f(0.25f,0.25f);    // 该keypoint在上一层的uv坐标
 				indexes[lvl+1]->findNeighbors(resultSet1, (float*)&pt, nanoflann::SearchParams());
 
-				pts[i].parent = ret_index[0];
-				pts[i].parentDist = expf(-ret_dist[0]*NNDistFactor);
+				pts[i].parent = ret_index[0];   // parent在上一层keypoints序列中的id
+				pts[i].parentDist = expf(-ret_dist[0]*NNDistFactor);   // 在上一层图像空间上，parent到该keypoint的像素距离
 
 				assert(ret_index[0]>=0 && ret_index[0] < numPoints[lvl+1]);
 			}
 			else
 			{
-				pts[i].parent = -1;
+				pts[i].parent = -1;     // 如果已经是最高层了，那么它没有parent
 				pts[i].parentDist = -1;
 			}
 		}
@@ -1037,7 +1056,7 @@ void CoarseInitializer::makeNN()
 	// done.
 
 	for(int i=0;i<pyrLevelsUsed;i++)
-		delete indexes[i];
+		delete indexes[i];  // delete声明的指向kdtree的指针
 }
 }
 

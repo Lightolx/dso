@@ -130,8 +130,8 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 
 	for(int i=0;i<pyrLevelsUsed;i++)
 	{
-		dIp[i] = new Eigen::Vector3f[wG[i]*hG[i]];
-		absSquaredGrad[i] = new float[wG[i]*hG[i]];
+		dIp[i] = new Eigen::Vector3f[wG[i]*hG[i]];  // 每一层的每个像素点，都分配一个Eigen::Vector3d，用来存储I,du,dv
+		absSquaredGrad[i] = new float[wG[i]*hG[i]]; // 每一层的每个像素点，都分配一个float，用来存储梯度
 	}
 	dI = dIp[0];
 
@@ -140,7 +140,7 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 	int w=wG[0];
 	int h=hG[0];
 	for(int i=0;i<w*h;i++)
-		dI[i][0] = color[i];
+		dI[i][0] = color[i];    // 第1个通道存储灰度
 
 	for(int lvl=0; lvl<pyrLevelsUsed; lvl++)
 	{
@@ -148,17 +148,18 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 		Eigen::Vector3f* dI_l = dIp[lvl];
 
 		float* dabs_l = absSquaredGrad[lvl];
-		if(lvl>0)
+		if(lvl>0)   // 如果不是金字塔的最底层，那么先双线性插值计算出该层的灰度
 		{
 			int lvlm1 = lvl-1;
 			int wlm1 = wG[lvlm1];
-			Eigen::Vector3f* dI_lm = dIp[lvlm1];
+			Eigen::Vector3f* dI_lm = dIp[lvlm1];    // 上一层的图像灰度
 
 
 
-			for(int y=0;y<hl;y++)
+			for(int y=0;y<hl;y++)   // 该层的每个像素都计算灰度
 				for(int x=0;x<wl;x++)
 				{
+				    // u,v都放大2倍后，也就是(2*x + 2*y*wlm1)，附近4个像素灰度值的平均
 					dI_l[x + y*wl][0] = 0.25f * (dI_lm[2*x   + 2*y*wlm1][0] +
 												dI_lm[2*x+1 + 2*y*wlm1][0] +
 												dI_lm[2*x   + 2*y*wlm1+wlm1][0] +
@@ -166,22 +167,24 @@ void FrameHessian::makeImages(float* color, CalibHessian* HCalib)
 				}
 		}
 
-		for(int idx=wl;idx < wl*(hl-1);idx++)
+		for(int idx=wl;idx < wl*(hl-1);idx++)   // 之所以从wl开始是因为图像第1行是border，计算不了梯度
 		{
-			float dx = 0.5f*(dI_l[idx+1][0] - dI_l[idx-1][0]);
-			float dy = 0.5f*(dI_l[idx+wl][0] - dI_l[idx-wl][0]);
-
+			float dx = 0.5f*(dI_l[idx+1][0] - dI_l[idx-1][0]);      // 横向梯度du
+			float dy = 0.5f*(dI_l[idx+wl][0] - dI_l[idx-wl][0]);    // 纵向梯度dv
+            // todo:: 这里是有bug的，对于左右两侧边缘的像素点的梯度计算有问题
 
 			if(!std::isfinite(dx)) dx=0;
 			if(!std::isfinite(dy)) dy=0;
 
-			dI_l[idx][1] = dx;
+			dI_l[idx][1] = dx;  // 第2,3个通道分别存储du, dv
 			dI_l[idx][2] = dy;
 
 
 			dabs_l[idx] = dx*dx+dy*dy;
 
-			if(setting_gammaWeightsPixelSelect==1 && HCalib!=0)
+            // 见3.2节step1的最后一句话，在使用像素梯度提取keypoint的时候，我们是在raw image上操作，而不是在经过光度矫正后的image上操作，
+            // 所以这里要把已经矫正过的dI_l还原回去，再重新计算像素梯度
+			if(setting_gammaWeightsPixelSelect==1 && HCalib!=nullptr)
 			{
 				float gw = HCalib->getBGradOnly((float)(dI_l[idx][0]));
 				dabs_l[idx] *= gw*gw;	// convert to gradient of original color space (before removing response).

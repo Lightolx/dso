@@ -40,11 +40,11 @@ const float minUseGrad_pixsel = 10;
 template<int pot>
 inline int gridMaxSelection(Eigen::Vector3f* grads, bool* map_out, int w, int h, float THFac)
 {
-
+    // map_out全部清零
 	memset(map_out, 0, sizeof(bool)*w*h);
 
 	int numGood = 0;
-	for(int y=1;y<h-pot;y+=pot)
+	for(int y=1;y<h-pot;y+=pot)         // 这个pot指d*d网格的grid_size，这里一般设置为5
 	{
 		for(int x=1;x<w-pot;x+=pot)
 		{
@@ -55,43 +55,46 @@ inline int gridMaxSelection(Eigen::Vector3f* grads, bool* map_out, int w, int h,
 
 			float bestXX=0, bestYY=0, bestXY=0, bestYX=0;
 
-			Eigen::Vector3f* grads0 = grads+x+y*w;
-			for(int dx=0;dx<pot;dx++)
+			Eigen::Vector3f* grads0 = grads+x+y*w;  // 当前cell左上角像素处的I,du,dv
+			for(int dx=0;dx<pot;dx++)       // 遍历cell中的每一个像素
 				for(int dy=0;dy<pot;dy++)
 				{
 					int idx = dx+dy*w;
-					Eigen::Vector3f g=grads0[idx];
-					float sqgd = g.tail<2>().squaredNorm();
+					Eigen::Vector3f g=grads0[idx];  // 该像素处的I,du,dv
+					float sqgd = g.tail<2>().squaredNorm();     // du*du + dv*dv
 					float TH = THFac*minUseGrad_pixsel * (0.75f);
 
-					if(sqgd > TH*TH)
+					if(sqgd > TH*TH)    // 该像素处的梯度大于设定阈值
 					{
-						float agx = fabs((float)g[1]);
+					    // 这里也是打擂台方式，选出cell中4种梯度最大的点，这样一轮操作下来，一个d*d的cell中最多
+					    // 会选出4个keypoint（之所以说最多是因为有可能出现某个像素点它的du,dv,du-dv,du+dv都是最大的）
+						float agx = fabs((float)g[1]);  // du
 						if(agx > bestXX) {bestXX=agx; bestXXID=idx;}
 
-						float agy = fabs((float)g[2]);
+						float agy = fabs((float)g[2]);  // dv
 						if(agy > bestYY) {bestYY=agy; bestYYID=idx;}
 
-						float gxpy = fabs((float)(g[1]-g[2]));
+						float gxpy = fabs((float)(g[1]-g[2]));  // du - dv
 						if(gxpy > bestXY) {bestXY=gxpy; bestXYID=idx;}
 
-						float gxmy = fabs((float)(g[1]+g[2]));
+						float gxmy = fabs((float)(g[1]+g[2]));  // du + dv
 						if(gxmy > bestYX) {bestYX=gxmy; bestYXID=idx;}
 					}
 				}
 
-			bool* map0 = map_out+x+y*w;
+			bool* map0 = map_out+x+y*w; // 当前cell左上角像素处的指针
 
+			// 该cell内存在像素点梯度大于阈值
 			if(bestXXID>=0)
 			{
-				if(!map0[bestXXID])
+				if(!map0[bestXXID])     // 这个像素还未被选中为keypoint
 					numGood++;
-				map0[bestXXID] = true;
+				map0[bestXXID] = true;  // 设为true，标记为将它设置为keypoint
 
 			}
 			if(bestYYID>=0)
 			{
-				if(!map0[bestYYID])
+				if(!map0[bestYYID])     // 可能在上面的map0[bestXXID]已经被设置为true了，所以这里检查下
 					numGood++;
 				map0[bestYYID] = true;
 
@@ -113,7 +116,7 @@ inline int gridMaxSelection(Eigen::Vector3f* grads, bool* map_out, int w, int h,
 		}
 	}
 
-	return numGood;
+	return numGood;     // 返回提取的keypoint的个数
 }
 
 
@@ -207,7 +210,7 @@ inline int makePixelStatus(Eigen::Vector3f* grads, bool* map, int w, int h, floa
 	else if(sparsityFactor==2) numGoodPoints = gridMaxSelection<2>(grads, map, w, h, THFac);
 	else if(sparsityFactor==3) numGoodPoints = gridMaxSelection<3>(grads, map, w, h, THFac);
 	else if(sparsityFactor==4) numGoodPoints = gridMaxSelection<4>(grads, map, w, h, THFac);
-	else if(sparsityFactor==5) numGoodPoints = gridMaxSelection<5>(grads, map, w, h, THFac);
+	else if(sparsityFactor==5) numGoodPoints = gridMaxSelection<5>(grads, map, w, h, THFac); // THFc = 1.0
 	else if(sparsityFactor==6) numGoodPoints = gridMaxSelection<6>(grads, map, w, h, THFac);
 	else if(sparsityFactor==7) numGoodPoints = gridMaxSelection<7>(grads, map, w, h, THFac);
 	else if(sparsityFactor==8) numGoodPoints = gridMaxSelection<8>(grads, map, w, h, THFac);
@@ -222,7 +225,8 @@ inline int makePixelStatus(Eigen::Vector3f* grads, bool* map, int w, int h, floa
 	 */
 
 	float quotia = numGoodPoints / (float)(desiredDensity);
-
+    // std::cout << "quatia = " << quotia << std::endl;
+    // 如果quotia < 1, 那就说明提取的keypoints数目小于预期，那就应该缩小cell的grid_size，因此sparsityFactor * sqrtf(quotia)
 	int newSparsity = (sparsityFactor * sqrtf(quotia))+0.7f;
 
 
@@ -233,21 +237,21 @@ inline int makePixelStatus(Eigen::Vector3f* grads, bool* map, int w, int h, floa
 	if(newSparsity==1 && sparsityFactor==1) THFac = 0.5;
 
 
-	if((abs(newSparsity-sparsityFactor) < 1 && THFac==oldTHFac) ||
-			( quotia > 0.8 &&  1.0f / quotia > 0.8) ||
-			recsLeft == 0)
+	if((abs(newSparsity-sparsityFactor) < 1 && THFac==oldTHFac) ||  // 新老sparsity比较接近
+			( quotia > 0.8 &&  1.0f / quotia > 0.8) ||   // wanted / have　的差距小于0.8
+			recsLeft == 0)  // 5次迭代机会已经用完了．上述三者满足其一，都说明函数要返回，递归结束了
 	{
 
 //		printf(" \n");
 		//all good
-		sparsityFactor = newSparsity;
+		sparsityFactor = newSparsity;   // 在这个sparsityFactor下提取到了数量合适的keypoints，那么以后就用这个sparsity
 		return numGoodPoints;
 	}
 	else
 	{
 //		printf(" -> re-evaluate! \n");
 		// re-evaluate.
-		sparsityFactor = newSparsity;
+		sparsityFactor = newSparsity;   // 在新的sparsityFactor，也就是新的grid_size下再提取一次
 		return makePixelStatus(grads, map, w,h, desiredDensity, recsLeft-1, THFac);
 	}
 }

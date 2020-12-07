@@ -155,7 +155,7 @@ public:
 
 	bool isLost;
 	bool initFailed;
-	bool initialized;
+	bool initialized;           // false，还未完成初始化; true，已经初始化完成，可以开始VO了
 	bool linearizeOperation;	// 依次读取离线数据，不要求实时运行
 
 
@@ -164,7 +164,7 @@ public:
 
 private:
 
-	CalibHessian Hcalib;
+	CalibHessian Hcalib;    // Gamma矫正系数，也就是256个离散值，表示非线性响应函数G()
 
 
 
@@ -254,7 +254,7 @@ private:
 	// =================== changed by tracker-thread. protected by trackMutex ============
 	boost::mutex trackMutex;
 	std::vector<FrameShell*> allFrameHistory;
-	CoarseInitializer* coarseInitializer;
+	CoarseInitializer* coarseInitializer;   // FullSystem的构造函数中被初始化
 	Vec5 lastCoarseRMSE;
 
 

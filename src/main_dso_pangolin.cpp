@@ -96,7 +96,7 @@ void exitThread()
 void settingsDefault(int preset)
 {
 	printf("\n=============== PRESET Settings: ===============\n");
-	if(preset == 0 || preset == 1)
+	if(preset == 0 || preset == 1)  // 表示默认参数，一帧一帧读进来回放
 	{
 		printf("DEFAULT settings:\n"
 				"- %s real-time enforcing\n"
@@ -337,7 +337,7 @@ void parseArgument(char* arg)
 		}
 		if(option==2)
 		{
-			printf("PHOTOMETRIC MODE WITH PERFECT IMAGES!\n");
+			printf("PHOTOMETRIC MODE WITH PERFECT IMAGES!\n");  // 表示图像是预先离线光度标定好了的
 			setting_photometricCalibration = 0;
 			setting_affineOptModeA = -1; //-1: fix. >=0: optimize (with prior, if > 0).
 			setting_affineOptModeB = -1; //-1: fix. >=0: optimize (with prior, if > 0).
@@ -360,7 +360,10 @@ int main( int argc, char** argv )
 	// hook crtl+C.
 	boost::thread exThread = boost::thread(exitThread);
 
-
+    // source:     视频流序列
+    // calib:      图像宽高,内参矩阵K
+    // gammaCalib: 成像非线性响应函数
+    // vignette:   光晕模型
 	ImageFolderReader* reader = new ImageFolderReader(source,calib, gammaCalib, vignette);
 	reader->setGlobalCalibration();
 
@@ -470,7 +473,7 @@ int main( int argc, char** argv )
             if(preload)
                 img = preloadedImages[ii];
             else
-                img = reader->getImage(i);
+                img = reader->getImage(i);  // 经过光度矫正，并且resize()到640*480的图像
 
 
 

@@ -116,8 +116,11 @@ struct FrameHessian
 	//DepthImageWrap* frame;
 	FrameShell* shell;
 
+    // 存储第0层的每个像素点的I,du,dv，也就是灰度、横向梯度、纵向梯度
 	Eigen::Vector3f* dI;				 // trace, fine tracking. Used for direction select (not for gradient histograms etc.)
+    // 每一层的每个像素点，都分配一个Eigen::Vector3d，存储I,du,dv
 	Eigen::Vector3f* dIp[PYR_LEVELS];	 // coarse tracking / coarse initializer. NAN in [0] only.
+    // 每一层的每个像素点，都分配一个float，用来存储(du*du + dv*dv)
 	float* absSquaredGrad[PYR_LEVELS];  // only used for pixel select (histograms etc.). no NAN.
 
 
@@ -131,7 +134,7 @@ struct FrameHessian
 
 	// Photometric Calibration Stuff
 	float frameEnergyTH;	// set dynamically depending on tracking residual
-	float ab_exposure;
+	float ab_exposure;      // 图像曝光时间
 
 	bool flaggedForMarginalization;
 
@@ -247,13 +250,13 @@ struct FrameHessian
 	{
 		instanceCounter++;
 		flaggedForMarginalization=false;
-		frameID = -1;
-		efFrame = 0;
+		frameID = -1;       // frameID初始化的时候全部置为0
+		efFrame = nullptr;
 		frameEnergyTH = 8*8*patternNum;
 
 
 
-		debugImage=0;
+		debugImage=nullptr;
 	};
 
 
@@ -327,7 +330,7 @@ struct CalibHessian
 
 		instanceCounter++;
 		for(int i=0;i<256;i++)
-			Binv[i] = B[i] = i;		// set gamma function to identity
+			Binv[i] = B[i] = i;		// set gamma function to identity，构造函数时，非线性响应函数初始化为线性的
 	};
 
 
@@ -377,7 +380,7 @@ struct CalibHessian
 	};
 
 
-	float Binv[256];
+	float Binv[256];    // todo::没看太明白这个gamma响应函数
 	float B[256];
 
 
