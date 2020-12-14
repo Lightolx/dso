@@ -260,7 +260,7 @@ private:
 
 	// ================== changed by mapper-thread. protected by mapMutex ===============
 	boost::mutex mapMutex;
-	std::vector<FrameShell*> allKeyFramesHistory;
+	std::vector<FrameShell*> allKeyFramesHistory;   // 存储了所有的keyframes
 
 	EnergyFunctional* ef;
 	IndexThreadReduce<Vec10> treadReduce;
@@ -269,7 +269,7 @@ private:
 	PixelSelector* pixelSelector;
 	CoarseDistanceMap* coarseDistanceMap;
 
-	std::vector<FrameHessian*> frameHessians;	// ONLY changed in marginalizeFrame and addFrame.
+	std::vector<FrameHessian*> frameHessians;	// VO的滑窗，ONLY changed in marginalizeFrame and addFrame.
 	std::vector<PointFrameResidual*> activeResiduals;
 	float currentMinActDist;
 

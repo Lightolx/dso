@@ -195,7 +195,7 @@ public:
 
   inline void finish()
   {
-	shiftUp(true);
+	shiftUp(true);  // 千位计数，向前进位
 	num = numIn1+numIn1k+numIn1m;
   }
 
@@ -219,7 +219,7 @@ private:
 
   void shiftUp(bool force)
   {
-	  if(numIn1 > 1000 || force)
+	  if(numIn1 > 1000 || force)    // 这里像是个千位计数机制，每满1000个，就向前进一位，同时本位归零
 	  {
 		  A1k += A;
 		  A.setZero();
@@ -984,7 +984,7 @@ class Accumulator9
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
-  Mat99f H;
+  Mat99f H;     // 9维是当前keypoint加上围绕着它的8个菱形角点
   Vec9f b;
   size_t num;
 

@@ -186,7 +186,7 @@ struct AffLight
 
 		double a = exp(g2T.a-g2F.a) * exposureT / exposureF;    // 式(4)
 		double b = g2T.b - a*g2F.b;
-		return Vec2(a,b);
+		return Vec2(a,b);   // 注意这里的a拿去用的时候就不用指数映射exp(a)了
 	}
 
 	Vec2 vec()

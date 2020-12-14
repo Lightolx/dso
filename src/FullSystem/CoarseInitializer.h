@@ -117,14 +117,14 @@ private:
 	int h[PYR_LEVELS];
 	void makeK(CalibHessian* HCalib);
 
-	bool snapped;
+	bool snapped;   // 当前帧与第0帧的位移足够大，可以进行初始化了
 	int snappedAt;
 
 	// pyramid images & levels on all levels
 	Eigen::Vector3f* dINew[PYR_LEVELS];
 	Eigen::Vector3f* dIFist[PYR_LEVELS];
 
-	Eigen::DiagonalMatrix<float, 8> wM;
+	Eigen::DiagonalMatrix<float, 8> wM;		// 总共有4个state vector，rotation, translation, a, b, 因此对这4个优化变量设置不同的权重
 
 	// temporary buffers for H and b.
 	Vec10f* JbBuffer;			// 0-7: sum(dd * dp). 8: sum(res*dd). 9: 1/(1+sum(dd*dd))=inverse hessian entry.

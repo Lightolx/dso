@@ -22,6 +22,7 @@ find_package(Boost COMPONENTS system thread)
 find_package(LibZip QUIET)
 find_package(Pangolin 0.2 QUIET)
 find_package(OpenCV QUIET)
+find_package(Glog REQUIRED)
 
 # flags
 add_definitions("-DENABLE_SSE")
@@ -63,6 +64,7 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/thirdparty/Sophus
   ${PROJECT_SOURCE_DIR}/thirdparty/sse2neon
   ${EIGEN3_INCLUDE_DIR}
+		${Glog_INCLUDE_DIRS}
 ) 
 
 
@@ -126,7 +128,7 @@ endif()
 if (OpenCV_FOUND AND Pangolin_FOUND)
 	message("--- compiling dso_dataset.")
 	add_executable(dso_dataset ${PROJECT_SOURCE_DIR}/src/main_dso_pangolin.cpp )
-    target_link_libraries(dso_dataset dso boost_system cxsparse ${BOOST_THREAD_LIBRARY} ${LIBZIP_LIBRARY} ${Pangolin_LIBRARIES} ${OpenCV_LIBS})
+    target_link_libraries(dso_dataset dso boost_system cxsparse ${BOOST_THREAD_LIBRARY} ${LIBZIP_LIBRARY} ${Pangolin_LIBRARIES} ${OpenCV_LIBS} ${GLOG_LIBRARY})
 else()
 	message("--- not building dso_dataset, since either don't have openCV or Pangolin.")
 endif()

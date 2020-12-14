@@ -44,8 +44,8 @@ public:
 	FrameShell* trackingRef;
 
 	// constantly adapted.
-	SE3 camToWorld;				// Write: TRACKING, while frame is still fresh; MAPPING: only when locked [shellPoseMutex].
-	AffLight aff_g2l;       // 光度映射函数，矫正图像灰度的affine matrix
+	SE3 camToWorld;				// Twc, Write: TRACKING, while frame is still fresh; MAPPING: only when locked [shellPoseMutex].
+	AffLight aff_g2l;       // 光度映射函数，把图像灰度从reference帧affine到target帧上
 	bool poseValid;         // 构造函数中直接初始化为true，有点强悍啊，意味着来了一帧我就有信心必然能算出它的pose
 
 	// statisitcs

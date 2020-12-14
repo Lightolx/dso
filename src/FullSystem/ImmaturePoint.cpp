@@ -74,11 +74,12 @@ ImmaturePoint::~ImmaturePoint()
  */
 ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hostToFrame_KRKi, const Vec3f &hostToFrame_Kt, const Vec2f& hostToFrame_affine, CalibHessian* HCalib, bool debugPrint)
 {
+    // 如果这个immature point已经被optimize成了mature point，或者已经被边缘化掉了，那就不用再使用当前帧更新其逆深度了
 	if(lastTraceStatus == ImmaturePointStatus::IPS_OOB) return lastTraceStatus;
 
 
 	debugPrint = false;//rand()%100==0;
-	float maxPixSearch = (wG[0]+hG[0])*setting_maxPixSearch;
+	float maxPixSearch = (wG[0]+hG[0])*setting_maxPixSearch;    // 最大的极线搜索长度，理论上与2d点深度的最大值和最小值有关
 
 	if(debugPrint)
 		printf("trace pt (%.1f %.1f) from frame %d to %d. Range %f -> %f. t %f %f %f!\n",
@@ -96,9 +97,10 @@ ImmaturePointStatus ImmaturePoint::traceOn(FrameHessian* frame,const Mat33f &hos
 	// ============== project min and max. return if one of them is OOB ===================
 	Vec3f pr = hostToFrame_KRKi * Vec3f(u,v, 1);
 	Vec3f ptpMin = pr + hostToFrame_Kt*idepth_min;
-	float uMin = ptpMin[0] / ptpMin[2];
+	float uMin = ptpMin[0] / ptpMin[2];     // 把该immature point的最小逆深度重投影到当前帧上，计算重投影的uv坐标
 	float vMin = ptpMin[1] / ptpMin[2];
 
+    // 落在了图像边界内，则认为超出了视野范围，很难找到2d correspondence了，需要被marg掉了
 	if(!(uMin > 4 && vMin > 4 && uMin < wG[0]-5 && vMin < hG[0]-5))
 	{
 		if(debugPrint) printf("OOB uMin %f %f - %f %f %f (id %f-%f)!\n",

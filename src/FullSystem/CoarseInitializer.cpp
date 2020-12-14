@@ -36,7 +36,7 @@
 #include "FullSystem/PixelSelector.h"
 #include "FullSystem/PixelSelector2.h"
 #include "util/nanoflann.h"
-
+#include <glog/logging.h>
 
 #if !defined(__SSE3__) && !defined(__SSE2__) && !defined(__SSE1__)
 #include "SSE2NEON.h"
@@ -132,9 +132,11 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 		if(lvl<pyrLevelsUsed-1)     // 如果不是金字塔最顶层（因为最顶层没有上一层，老老实实地从逆深度等于0开始迭代）
 			propagateDown(lvl+1);   // 将当前层所有keypoints的逆深度初始化为上一层的parent的逆深度，加速本层keypoints逆深度的收敛
 
-		Mat88f H,Hsc; Vec8f b,bsc;  // normal equation, 即 H*Δx=b 中的H,b
+		Mat88f H,Hsc; Vec8f b,bsc;  // normal equation, 即 H*Δx=b 中的H,b. 8维是因为周围有8个点？
 		resetPoints(lvl);   // 重置每个keypoint的idepth_new = idepth
 		Vec3f resOld = calcResAndGS(lvl, H, b, Hsc, bsc, refToNew_current, refToNew_aff_current, false);
+        // 更新当前层每一个kpt的energy, isGood, idepth, lastHessian，
+        // 之所以写在while()循环外面的意思是，无论残差是否增大了，都强制执行一次迭代？
 		applyStep(lvl);
 
 		float lambda = 0.1;
@@ -160,40 +162,44 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 		while(true)
 		{
 			Mat88f Hl = H;
-			for(int i=0;i<8;i++) Hl(i,i) *= (1+lambda);
+			for(int i=0;i<8;i++) Hl(i,i) *= (1+lambda);     // 这里看得出来是LM方法
 			Hl -= Hsc*(1/(1+lambda));
 			Vec8f bl = b - bsc*(1/(1+lambda));
 
+            // H和b都乘以(0.01f/(w[lvl]*h[lvl]))应该是为了减小数值, 使得整个方程更稳定
 			Hl = wM * Hl * wM * (0.01f/(w[lvl]*h[lvl]));
 			bl = wM * bl * (0.01f/(w[lvl]*h[lvl]));
 
 
 			Vec8f inc;
-			if(fixAffine)
+			if(fixAffine)   // 不优化光度校正系数a,b，只优化相对pose
 			{
+			    // 可以看到只有左上角6*6的子矩阵块生效
 				inc.head<6>() = - (wM.toDenseMatrix().topLeftCorner<6,6>() * (Hl.topLeftCorner<6,6>().ldlt().solve(bl.head<6>())));
-				inc.tail<2>().setZero();
+				inc.tail<2>().setZero();    // a,b的增量为0
 			}
 			else
-				inc = - (wM * (Hl.ldlt().solve(bl)));	//=-H^-1 * b.
+				inc = - (wM * (Hl.ldlt().solve(bl)));	//=-H^-1 * b.   正常的正规方程求解增量
 
-
+            // 更新pose与光度矫正系数，不过注意的是现在更新的结果都还保留在局部变量中，也就是还未确定是否要接受这一步更新
+            // 所以下面会再调用一次calcResAndGS()函数，计算更新后的残差．如果更新后残差减小了，就接受这一次更新
 			SE3 refToNew_new = SE3::exp(inc.head<6>().cast<double>()) * refToNew_current;
 			AffLight refToNew_aff_new = refToNew_aff_current;
 			refToNew_aff_new.a += inc[6];
 			refToNew_aff_new.b += inc[7];
-			doStep(lvl, lambda, inc);
+			doStep(lvl, lambda, inc);   // 更新每个keypoint的逆深度，这是真的更新，不是存储在局部变量中
 
 
 			Mat88f H_new, Hsc_new; Vec8f b_new, bsc_new;
+			// 在新的相对pose，光度affine matrix，以及kpt逆深度下，再计算一次残差
 			Vec3f resNew = calcResAndGS(lvl, H_new, b_new, Hsc_new, bsc_new, refToNew_new, refToNew_aff_new, false);
-			Vec3f regEnergy = calcEC(lvl);
+			Vec3f regEnergy = calcEC(lvl);  // 这个refEnergy表示了idepth regulate相关的残差，表示整张图上depth的光滑度
 
 			float eTotalNew = (resNew[0]+resNew[1]+regEnergy[1]);
 			float eTotalOld = (resOld[0]+resOld[1]+regEnergy[0]);
 
 
-			bool accept = eTotalOld > eTotalNew;
+			bool accept = eTotalOld > eTotalNew;    // 如果新的残差小于旧的残差，那么就接受这一次迭代更新
 
 			if(printDebug)
 			{
@@ -215,8 +221,8 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 			if(accept)
 			{
 
-				if(resNew[1] == alphaK*numPoints[lvl])
-					snapped = true;
+				if(resNew[1] == alphaK*numPoints[lvl])  // 为啥是等于号，而不是大于号，应该没这么巧吧
+					snapped = true; // 当前帧相对于第0帧的位移足够大，那么就可以认定初始化成功了
 				H = H_new;
 				b = b_new;
 				Hsc = Hsc_new;
@@ -224,13 +230,13 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 				resOld = resNew;
 				refToNew_aff_current = refToNew_aff_new;
 				refToNew_current = refToNew_new;
-				applyStep(lvl); // 本质上也是一个直接法，求初始化两帧之间的相对pose
-				optReg(lvl);
+				applyStep(lvl); // 更新每一个kpt的energy, isGood, idepth, lastHessian
+				optReg(lvl);    // 更新iR，也就是fake的逆深度的ground truth
 				lambda *= 0.5;
 				fails=0;
 				if(lambda < 0.0001) lambda = 0.0001;
 			}
-			else
+			else    // 如果迭代后的残差比老的残差还要大，说明优化函数陷入了困境，需要一个大的冲量跳出局部最优
 			{
 				fails++;
 				lambda *= 4;
@@ -239,6 +245,7 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 
 			bool quitOpt = false;
 
+			// 迭代退出条件，无非就是增量Δx过小，达到迭代次数，或者两次迭代残差都变大了，说明迭代陷入了死胡同
 			if(!(inc.norm() > eps) || iteration >= maxIterations[lvl] || fails >= 2)
 			{
 				Mat88f H,Hsc; Vec8f b,bsc;
@@ -255,12 +262,12 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	}
 
 
-
+    // 初始化最终的优化结果，两帧的相对pose(Twc)和光度矫正系数(a,b)
 	thisToNext = refToNew_current;
 	thisToNext_aff = refToNew_aff_current;
 
 	for(int i=0;i<pyrLevelsUsed-1;i++)
-		propagateUp(i);
+		propagateUp(i); // 使用归一化积，从底层往上层更新每个kpt的parent的idepth
 
 
 
@@ -269,14 +276,14 @@ bool CoarseInitializer::trackFrame(FrameHessian* newFrameHessian, std::vector<IO
 	if(!snapped) snappedAt=0;
 
 	if(snapped && snappedAt==0)
-		snappedAt = frameID;
+		snappedAt = frameID;    // 与第0帧相比，拥有足够位移的帧的id
 
 
 
     debugPlot(0,wraps);
 
 
-
+    // 从拥有足够位移的帧往后再连续track到了5帧，这样才算初始化成功了
 	return snapped && frameID > snappedAt+5;
 }
 
@@ -333,38 +340,38 @@ void CoarseInitializer::debugPlot(int lvl, std::vector<IOWrap::Output3DWrapper*>
 // calculates residual, Hessian and Hessian-block needed for re-substituting depth.
 Vec3f CoarseInitializer::calcResAndGS(
 		int lvl, Mat88f &H_out, Vec8f &b_out,
-		Mat88f &H_out_sc, Vec8f &b_out_sc,
+		Mat88f &H_out_sc, Vec8f &b_out_sc,      // sc是schur，即舒尔补的意思
 		const SE3 &refToNew, AffLight refToNew_aff,     // 两帧之间的相对pose，两帧之间的光度affine matrix
 		bool plot)
 {
 	int wl = w[lvl], hl = h[lvl];
-	Eigen::Vector3f* colorRef = firstFrame->dIp[lvl];
-	Eigen::Vector3f* colorNew = newFrame->dIp[lvl];
+	Eigen::Vector3f* colorRef = firstFrame->dIp[lvl];   // 第0帧的I,du,dv
+	Eigen::Vector3f* colorNew = newFrame->dIp[lvl];     // 第1帧的I,du,dv
 
-	Mat33f RKi = (refToNew.rotationMatrix() * Ki[lvl]).cast<float>();
-	Vec3f t = refToNew.translation().cast<float>();
+	Mat33f RKi = (refToNew.rotationMatrix() * Ki[lvl]).cast<float>();   // Rwc*K.inverse()
+	Vec3f t = refToNew.translation().cast<float>(); // twc
+	// 从第0帧到第1帧的光度映射矩阵，但其实是个单位阵
 	Eigen::Vector2f r2new_aff = Eigen::Vector2f(exp(refToNew_aff.a), refToNew_aff.b);
-
 	float fxl = fx[lvl];
 	float fyl = fy[lvl];
 	float cxl = cx[lvl];
 	float cyl = cy[lvl];
 
 
-	Accumulator11 E;
+	Accumulator11 E;    // 1*1的累加器，也就是只累加一个数
 	acc9.initialize();
-	E.initialize();
+	E.initialize();     // initialize()函数是在为累加器里面的数组分配空间
 
 
-	int npts = numPoints[lvl];
+	int npts = numPoints[lvl];  // first_frame的本层的keypoints数目
 	Pnt* ptsl = points[lvl];
-	for(int i=0;i<npts;i++)
+	for(int i=0;i<npts;i++)     // 遍历本层的所有keypoint
 	{
 
 		Pnt* point = ptsl+i;
 
 		point->maxstep = 1e10;
-		if(!point->isGood)
+		if(!point->isGood)      // setFirst()的时候在第0帧上提取出的kpt肯定都是good，但随着迭代的进行，可能有的kpt会被置为false
 		{
 			E.updateSingle((float)(point->energy[0]));
 			point->energy_new = point->energy;
@@ -372,7 +379,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 			continue;
 		}
 
-        VecNRf dp0;
+        VecNRf dp0;     // 8行1列的Eigen::Vector
         VecNRf dp1;
         VecNRf dp2;
         VecNRf dp3;
@@ -387,31 +394,37 @@ Vec3f CoarseInitializer::calcResAndGS(
 		// sum over all residuals.
 		bool isGood = true;
 		float energy=0;
-		for(int idx=0;idx<patternNum;idx++)
+		for(int idx=0;idx<patternNum;idx++) // patternNum = 8, 表示遍历该kpt的8个菱形角点
 		{
-			int dx = patternP[idx][0];
+			int dx = patternP[idx][0];  // (1,-1)等等，表示菱形角点相对于中心kpt的相对坐标
 			int dy = patternP[idx][1];
 
-
+            // Vec3f(point->u+dx, point->v+dy, 1)是该菱形角点的uv坐标的齐次表达式
+            // 从第0帧的camera系转到第1帧的camera系
 			Vec3f pt = RKi * Vec3f(point->u+dx, point->v+dy, 1) + t*point->idepth_new;
-			float u = pt[0] / pt[2];
 			float v = pt[1] / pt[2];
-			float Ku = fxl * u + cxl;
+            float u = pt[0] / pt[2];    // 转到camera1的归一化平面
+            float Ku = fxl * u + cxl;   // 转到camera1的像素平面
 			float Kv = fyl * v + cyl;
-			float new_idepth = point->idepth_new/pt[2];
+			float new_idepth = point->idepth_new/pt[2];     // 该keypoint在camera1的相机系下的逆深度
 
+			// 重投影位置落在了图像范围内，并且在camera1的相机系下的逆深度（深度）为正，表示在成像平面前面
+			// 满足上面两个条件的话，表示在当前的相对pose下，第0帧上的这个kpt的逆深度估计是有效的
 			if(!(Ku > 1 && Kv > 1 && Ku < wl-2 && Kv < hl-2 && new_idepth > 0))
 			{
 				isGood = false;
 				break;
 			}
 
+			// 双线性插值出该kpt重投影到第1帧上后，重投影位置的I,du,dv
 			Vec3f hitColor = getInterpolatedElement33(colorNew, Ku, Kv, wl);
 			//Vec3f hitColor = getInterpolatedElement33BiCub(colorNew, Ku, Kv, wl);
 
 			//float rlR = colorRef[point->u+dx + (point->v+dy) * wl][0];
+			// 双线性插值出在原图（第0帧）上，该kpt的该菱形角点的I，与上个函数getInterpolatedElement33()的区别在于只计算灰度I
 			float rlR = getInterpolatedElement31(colorRef, point->u+dx, point->v+dy, wl);
 
+			// 如果在原图（第0帧）或重投影图（第1帧）双线性插值计算得到的灰度为无穷大？一般不太会发生吧
 			if(!std::isfinite(rlR) || !std::isfinite((float)hitColor[0]))
 			{
 				isGood = false;
@@ -419,27 +432,32 @@ Vec3f CoarseInitializer::calcResAndGS(
 			}
 
 
-			float residual = hitColor[0] - r2new_aff[0] * rlR - r2new_aff[1];
+			// 计算原图的keypoint和重投影点的灰度差，也就是直接法最终的优化目标：光度残差
+			float residual = hitColor[0] - r2new_aff[0] * rlR - r2new_aff[1];   // r2new_aff是光度映射矩阵，把第0帧的灰度映射到第1帧
+			// hw,huber权重，鲁棒核函数，在光度残差小于9的时候，不使用核函数免得收敛震荡；大于9的时候才启用
 			float hw = fabs(residual) < setting_huberTH ? 1 : setting_huberTH / fabs(residual);
-			energy += hw *residual*residual*(2-hw);
+			energy += hw *residual*residual*(2-hw);     // 累加残差
 
 
 
-
+            // 对逆深度求导
 			float dxdd = (t[0]-t[2]*u)/pt[2];
 			float dydd = (t[1]-t[2]*v)/pt[2];
 
 			if(hw < 1) hw = sqrtf(hw);
-			float dxInterp = hw*hitColor[1]*fxl;
+			float dxInterp = hw*hitColor[1]*fxl;    // du*fx，梯度乘焦距
 			float dyInterp = hw*hitColor[2]*fyl;
+			// 对位姿(新状态)求导
 			dp0[idx] = new_idepth*dxInterp;
 			dp1[idx] = new_idepth*dyInterp;
 			dp2[idx] = -new_idepth*(u*dxInterp + v*dyInterp);
 			dp3[idx] = -u*v*dxInterp - (1+v*v)*dyInterp;
 			dp4[idx] = (1+u*u)*dxInterp + u*v*dyInterp;
 			dp5[idx] = -v*dxInterp + u*dyInterp;
+			// 对光度参数求导
 			dp6[idx] = - hw*r2new_aff[0] * rlR;
 			dp7[idx] = - hw*1;
+            // 对逆深度(旧状态)求导
 			dd[idx] = dxInterp * dxdd  + dyInterp * dydd;
 			r[idx] = hw*residual;
 
@@ -474,6 +492,7 @@ Vec3f CoarseInitializer::calcResAndGS(
 		point->energy_new[0] = energy;
 
 		// update Hessian matrix.
+        //　因为使用128位相当于每次加4个数, 因此i+=4
 		for(int i=0;i+3<patternNum;i+=4)
 			acc9.updateSSE(
 					_mm_load_ps(((float*)(&dp0))+i),
@@ -619,20 +638,21 @@ Vec3f CoarseInitializer::calcEC(int lvl)
 	AccumulatorX<2> E;
 	E.initialize();
 	int npts = numPoints[lvl];
-	for(int i=0;i<npts;i++)
+	for(int i=0;i<npts;i++)     // 遍历当前层的每一个kpt
 	{
 		Pnt* point = points[lvl]+i;
 		if(!point->isGood_new) continue;
-		float rOld = (point->idepth-point->iR);
+		float rOld = (point->idepth-point->iR);     // 预测值-真值，虽然这个真值iR是fake的
 		float rNew = (point->idepth_new-point->iR);
-		E.updateNoWeight(Vec2f(rOld*rOld,rNew*rNew));
+		E.updateNoWeight(Vec2f(rOld*rOld,rNew*rNew));   // 本质上就是累加
 
 		//printf("%f %f %f!\n", point->idepth, point->idepth_new, point->iR);
 	}
 	E.finish();
 
 	//printf("ER: %f %f %f!\n", couplingWeight*E.A1m[0], couplingWeight*E.A1m[1], (float)E.num.numIn1m);
-	return Vec3f(couplingWeight*E.A1m[0], couplingWeight*E.A1m[1], E.num);
+	// 返回新旧两个sum和累计的个数
+	return Vec3f(couplingWeight*E.A1m[0], couplingWeight*E.A1m[1], E.num);  // couplingWeight=1.0,常数
 }
 void CoarseInitializer::optReg(int lvl)
 {
@@ -697,8 +717,8 @@ void CoarseInitializer::propagateUp(int srcLvl)
 		if(!point->isGood) continue;
 
 		Pnt* parent = ptst + point->parent;
-		parent->iR += point->iR * point->lastHessian;
-		parent->iRSumNum += point->lastHessian;
+		parent->iR += point->iR * point->lastHessian;   //! 均值*信息矩阵 ∑ (sigma*u)
+		parent->iRSumNum += point->lastHessian;         //! 新的信息矩阵 ∑ sigma
 	}
 
 	for(int i=0;i<nptst;i++)
@@ -706,12 +726,13 @@ void CoarseInitializer::propagateUp(int srcLvl)
 		Pnt* parent = ptst+i;
 		if(parent->iRSumNum > 0)
 		{
+            //! 高斯归一化积后的均值
 			parent->idepth = parent->iR = (parent->iR / parent->iRSumNum);
 			parent->isGood = true;
 		}
 	}
 
-	optReg(srcLvl+1);
+	optReg(srcLvl+1);   // 使用附近的点来更新IR
 }
 
 void CoarseInitializer::propagateDown(int srcLvl)
@@ -729,24 +750,22 @@ void CoarseInitializer::propagateDown(int srcLvl)
 		Pnt* point = ptst+i;                // 待处理的keypoint
 		Pnt* parent = ptss+point->parent;   // 该keypoint的parent
 
-        // trackFrame()一进来，所有keypoints的lastHessian都被初始化成了0，所以直接continue了
-        // std::cout << "parent->isGood = " << parent->isGood << std::endl;
-        // std::cout << "parent->lastHessian = " << parent->lastHessian << std::endl;
 		if(!parent->isGood || parent->lastHessian < 0.1) continue;
-		if(!point->isGood)  // 这什么情况，按道理第0帧提取的keypoints都应该是good的
+		if(!point->isGood)
 		{
+            // 该keypoint非good,则它不能提供任何信息，就只有把parent的idepth直接给它, 并且置为good
 			point->iR = point->idepth = point->idepth_new = parent->iR;
 			point->isGood=true;
 			point->lastHessian=0;
 		}
 		else
 		{
-		    // 在setFirst中，iR都被初始化成了1，lastHessian都被初始化成了0
+		    // 高斯归一化积融合该keypoint与parent的iR
 			float newiR = (point->iR*point->lastHessian*2 + parent->iR*parent->lastHessian) / (point->lastHessian*2+parent->lastHessian);
 			point->iR = point->idepth = point->idepth_new = newiR;
 		}
 	}
-	optReg(srcLvl-1);
+	optReg(srcLvl-1);   // 更新iR,平滑下一层的idepth
 }
 
 
@@ -845,7 +864,8 @@ void CoarseInitializer::setFirst(	CalibHessian* HCalib, FrameHessian* newFrameHe
 
 
 				nl++;
-				assert(nl <= npts);     // 这一层构造出的keypoints的总数当然会少于提取出的总数
+                // 这一层构造出的keypoints的总数当然会少于提取出的总数,因为可能有些图像边界上的点不会被选中
+				assert(nl <= npts);
 			}
 		}
 
@@ -937,7 +957,7 @@ void CoarseInitializer::applyStep(int lvl)
 			pts[i].idepth = pts[i].idepth_new = pts[i].iR;
 			continue;
 		}
-		pts[i].energy = pts[i].energy_new;
+		pts[i].energy = pts[i].energy_new;  // 更新当前层每一个kpt的energy, isGood, idepth, lastHessian
 		pts[i].isGood = pts[i].isGood_new;
 		pts[i].idepth = pts[i].idepth_new;
 		pts[i].lastHessian = pts[i].lastHessian_new;

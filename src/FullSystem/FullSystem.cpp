@@ -55,6 +55,7 @@
 #include "util/ImageAndExposure.h"
 
 #include <cmath>
+#include <glog/logging.h>
 
 namespace dso
 {
@@ -475,14 +476,15 @@ void FullSystem::traceNewCoarse(FrameHessian* fh)
 
 	for(FrameHessian* host : frameHessians)		// go through all active frames
 	{
-
+        // Tc1c0 = Tc1w * Twc0, 当前帧相对于host帧的pose
 		SE3 hostToNew = fh->PRE_worldToCam * host->PRE_camToWorld;
 		Mat33f KRKi = K * hostToNew.rotationMatrix().cast<float>() * K.inverse();
 		Vec3f Kt = K * hostToNew.translation().cast<float>();
 
+		// 从host帧到当前帧的光度affine系数(a,b)，无法获得曝光时间的时候就是个单位阵
 		Vec2f aff = AffLight::fromToVecExposure(host->ab_exposure, fh->ab_exposure, host->aff_g2l(), fh->aff_g2l()).cast<float>();
 
-		for(ImmaturePoint* ph : host->immaturePoints)
+		for(ImmaturePoint* ph : host->immaturePoints)   // 遍历每个keyframe的每个immaturePoint，在当前帧上沿着极线搜索灰度差小于阈值的2d correspondence
 		{
 			ph->traceOn(fh, KRKi, Kt, aff, &Hcalib, false );
 
@@ -841,12 +843,12 @@ void FullSystem::addActiveFrame( ImageAndExposure* image, int id )
 
 			initializeFromInitializer(fh);
 			lock.unlock();
-			deliverTrackedFrame(fh, true);  // 实现多线程地图像数据输入
+			deliverTrackedFrame(fh, true);  // tracking线程处理完的frame送入到建图线程
 		}
 		else    // coarseInitializer->trackFrame(fh, outputWrapper)返回false，说明track第2帧失败，那么就delete这个第2帧，再继续用第3帧与第1帧初始化
 		{
 			// if still initializing
-			fh->shell->poseValid = false;
+			fh->shell->poseValid = false;   // 标记下这一帧处理不了，就当没看到过
 			delete fh;
 		}
 		return;
@@ -926,16 +928,17 @@ void FullSystem::deliverTrackedFrame(FrameHessian* fh, bool needKF)
 
 
 
-		if(needKF) makeKeyFrame(fh);
-		else makeNonKeyFrame(fh);
+		if(needKF) makeKeyFrame(fh);    // tracked frame可能作为keyframe,进行windowed BA，同时提取新的seeds
+		else makeNonKeyFrame(fh);   // 优化keyframes上的immature points的逆深度
 	}
 	else
 	{
-		boost::unique_lock<boost::mutex> lock(trackMapSyncMutex);
+		boost::unique_lock<boost::mutex> lock(trackMapSyncMutex);   // 跟踪线程和建图线程的同步锁
 		unmappedTrackedFrames.push_back(fh);
 		if(needKF) needNewKFAfter=fh->shell->trackingRef->id;
 		trackedFrameSignal.notify_all();
 
+        // 还没有tracked frame送给mapping线程, 就阻塞mapping线程免得它空转
 		while(coarseTracker_forNewKF->refFrameID == -1 && coarseTracker->refFrameID == -1 )
 		{
 			mappedFrameSignal.wait(lock);
@@ -1032,7 +1035,8 @@ void FullSystem::makeNonKeyFrame( FrameHessian* fh)
 	// needs to be set by mapping thread. no lock required since we are in mapping thread.
 	{
 		boost::unique_lock<boost::mutex> crlock(shellPoseMutex);
-		assert(fh->shell->trackingRef != 0);
+		assert(fh->shell->trackingRef != 0);    // 每一帧，不管是否会被设置为keyframe，都必定有reference frame
+		// Twc1 = Twc0 * Tc0c1
 		fh->shell->camToWorld = fh->shell->trackingRef->camToWorld * fh->shell->camToTrackingRef;
 		fh->setEvalPT_scaled(fh->shell->camToWorld.inverse(),fh->shell->aff_g2l);
 	}
@@ -1208,16 +1212,16 @@ void FullSystem::initializeFromInitializer(FrameHessian* newFrame)
 	firstFrame->idx = frameHessians.size();
 	frameHessians.push_back(firstFrame);
 	firstFrame->frameID = allKeyFramesHistory.size();
-	allKeyFramesHistory.push_back(firstFrame->shell);
-	ef->insertFrame(firstFrame, &Hcalib);
+	allKeyFramesHistory.push_back(firstFrame->shell);   // 所有的keyframes
+	ef->insertFrame(firstFrame, &Hcalib);   // 加入一个新的残差项，本质上是AddResidualBlock
 	setPrecalcValues();
 
 	//int numPointsTotal = makePixelStatus(firstFrame->dI, selectionMap, wG[0], hG[0], setting_desiredDensity);
 	//int numPointsTotal = pixelSelector->makeMaps(firstFrame->dIp, selectionMap,setting_desiredDensity);
 
-	firstFrame->pointHessians.reserve(wG[0]*hG[0]*0.2f);
-	firstFrame->pointHessiansMarginalized.reserve(wG[0]*hG[0]*0.2f);
-	firstFrame->pointHessiansOut.reserve(wG[0]*hG[0]*0.2f);
+	firstFrame->pointHessians.reserve(wG[0]*hG[0]*0.2f);                // active points
+	firstFrame->pointHessiansMarginalized.reserve(wG[0]*hG[0]*0.2f);    // marginalized points
+	firstFrame->pointHessiansOut.reserve(wG[0]*hG[0]*0.2f);             // outliers
 
 
 	float sumID=1e-5, numID=1e-5;
